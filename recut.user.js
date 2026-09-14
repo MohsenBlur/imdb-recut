@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.8.0
+// @version      2.9.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -1652,16 +1652,23 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-ext { display: inline-flex; align-items: center; gap: 9px; padding: 8px 14px; }
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
 
-/* ── homepage launcher ─────────────────────────────────────────────────── */
-.imdbc-home { padding: 56px 0 8px; max-width: 760px; }
-.imdbc-home .imdbc-h1 { font-size: clamp(28px, 4vw, 44px); }
-.imdbc-home-search { margin: 22px 0 16px; display: flex; }
+/* ── homepage ──────────────────────────────────────── */
+.imdbc-home { padding: 40px 0 4px; max-width: 760px; }
+.imdbc-home-search { margin: 0 0 14px; display: flex; }
 .imdbc-home-search input {
   width: 100%; padding: 14px 20px; border-radius: 999px; font: inherit;
   font-size: var(--fs-lead); border: 1px solid var(--imdbc-border);
   background: var(--imdbc-panel); color: var(--imdbc-text);
 }
 .imdbc-home-links { gap: 8px; }
+
+/* Rows scroll sideways rather than wrapping, so each section stays one card tall. */
+.imdbc-scroller {
+  display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px;
+  scroll-snap-type: x proximity; scrollbar-width: thin;
+}
+.imdbc-scroller > * { flex: 0 0 158px; scroll-snap-align: start; }
+@media (max-width: 760px) { .imdbc-scroller > * { flex-basis: 132px; } }
 .imdbc-home .imdbc-result .po { display: none; }
 
 /* ── where to watch ────────────────────────────────────────────────────── */
@@ -3086,12 +3093,72 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     };
   }
 
+  // What people actually open imdb.com for. IMDb builds these client-side, so
+  // they are fetched directly — one aliased query for all three rows.
+  const HOME_CARD_FIELDS = `
+    id
+    titleText { text }
+    titleType { id text canHaveEpisodes }
+    releaseYear { year endYear }
+    primaryImage { url width height }
+    ratingsSummary { aggregateRating voteCount }
+    runtime { seconds }
+    certificate { rating }
+    titleGenres { genres { genre { text } } }`;
+
+  function fetchHomeRows() {
+    return memoizeDisk('home:rows', 60 * 60 * 1000, async () => {
+      const data = await gql(`{
+        trending: trendingTitles(limit: 14) { titles { ${HOME_CARD_FIELDS} } }
+        popMovies: chartTitles(first: 14, chart: { chartType: MOST_POPULAR_MOVIES }) { edges { node { ${HOME_CARD_FIELDS} } } }
+        popTv: chartTitles(first: 14, chart: { chartType: MOST_POPULAR_TV_SHOWS }) { edges { node { ${HOME_CARD_FIELDS} } } }
+      }`);
+      const fromEdges = (c) => edges(c).map(normaliseTitleCard).filter(Boolean);
+      return {
+        trending: ((data && data.trending && data.trending.titles) || []).map(normaliseTitleCard).filter(Boolean),
+        popMovies: fromEdges(data && data.popMovies),
+        popTv: fromEdges(data && data.popTv)
+      };
+    });
+  }
+
+  const HOME_ROWS = [
+    { key: 'trending', label: 'Trending' },
+    { key: 'popMovies', label: 'Popular movies', more: '/chart/moviemeter/' },
+    { key: 'popTv', label: 'Popular TV', more: '/chart/tvmeter/' }
+  ];
+
+  async function wireHome(root) {
+    const host = root.querySelector('[data-imdbc-home-rows]');
+    if (!host) return;
+    const token = renderSeq;
+    let rows;
+    try {
+      rows = await fetchHomeRows();
+    } catch (e) {
+      warn('homepage rows failed', e);
+      if (token !== renderSeq || !root.isConnected) return;
+      host.innerHTML = interpolate(html`<p class="imdbc-note">Couldn't load what's popular right now.</p>`);
+      return;
+    }
+    if (token !== renderSeq || !root.isConnected) return;
+
+    host.innerHTML = HOME_ROWS.map((r) => {
+      const items = (rows && rows[r.key]) || [];
+      if (!items.length) return '';
+      return interpolate(html`
+        <section class="imdbc-sec">
+          ${sectionHead(r.label, '', r.more ? html`<a class="imdbc-btn" href="${imdbUrl(r.more)}">See all</a>` : '')}
+          <div class="imdbc-cards imdbc-scroller">${items.map(titleCard)}</div>
+        </section>`);
+    }).join('');
+  }
+
   function renderHome(root, home) {
     root.innerHTML = interpolate(html`
       ${topBar(imdbUrl('/'))}
       <div class="imdbc-wrap">
         <div class="imdbc-home">
-          <h1 class="imdbc-h1">IMDb, quietly</h1>
           <form class="imdbc-home-search" action="${imdbUrl('/find/')}" method="get" role="search" autocomplete="off">
             <input type="search" name="q" placeholder="Search films, shows and people"
                    aria-label="Search IMDb" autocomplete="off" spellcheck="false" data-imdbc-home-q>
@@ -3099,6 +3166,10 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           <div class="imdbc-tools imdbc-home-links">
             ${HOME_LINKS.map((l) => html`<a class="imdbc-btn" href="${imdbUrl(l.path)}">${l.label}</a>`)}
           </div>
+        </div>
+
+        <div data-imdbc-home-rows>
+          <p class="imdbc-loading" style="margin-top:28px">Loading what's popular</p>
         </div>
 
         ${home.weekend.length ? html`
@@ -3124,6 +3195,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       </div>`);
 
     wireTopBar(root);
+    wireHome(root);
     const q = root.querySelector('[data-imdbc-home-q]');
     if (q) q.focus();
   }
