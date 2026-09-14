@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.10.0
+// @version      2.10.1
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -199,6 +199,26 @@
     if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M';
     if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'K';
     return String(n);
+  }
+
+  /**
+   * Every count printed under a score reads the same way, whatever site it came
+   * from: one compact number, one lowercase noun. The strip used to put IMDb's
+   * "2.2M votes" next to Rotten Tomatoes' own "250,000+ Ratings" and
+   * Letterboxd's "3.3M ratings" - three number styles and two capitalisations
+   * on one row of five tiles.
+   */
+  function countText(n, noun) {
+    return typeof n === 'number' && n > 0 ? compactNum(n) + ' ' + noun : '';
+  }
+
+  /** The same, from a pre-banded phrase like "250,000+ Ratings". */
+  function bandedCountText(text, noun) {
+    const m = /^\s*([\d,]+)\s*(\+?)/.exec(String(text || ''));
+    if (!m) return '';
+    const value = parseInt(m[1].replace(/,/g, ''), 10);
+    if (!isFinite(value) || value <= 0) return '';
+    return compactNum(value) + m[2] + ' ' + noun;
   }
 
   function runtimeText(seconds) {
@@ -1576,7 +1596,6 @@ html.imdbc-off #imdbc-root { display: none !important; }
 .imdbc-credit .role b { color: var(--imdbc-text); font-weight: 600; }
 .imdbc-credit .eps { font-size: var(--fs-tiny); color: var(--imdbc-faint); }
 .imdbc-credit .rt { font-weight: 700; font-size: var(--fs-item); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.imdbc-credit .rt small { color: var(--imdbc-faint); font-weight: 400; }
 
 /* ── known for ─────────────────────────────────────────────────────────── */
 .imdbc-knownfor { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 46%), 1fr)); gap: 22px; }
@@ -1635,7 +1654,12 @@ html.imdbc-on.imdbc-dark {
 .rb-mid { color: var(--rb-mid); }
 .rb-low { color: var(--rb-low); }
 .rb-thin { opacity: .62; }
-.rb-thin small { opacity: .85; }
+
+/* The count qualifies the score, it is not a score. Painting both with the band
+   made every "6.4 4.4K" read as two ratings side by side. */
+:where(#imdbc-root) .rt small {
+  color: var(--imdbc-faint); font-weight: 400; font-size: var(--fs-tiny);
+}
 
 /* The tile keeps its brand mark and edge for identity; the number carries the band. */
 .imdbc-score.rb-top .val { color: var(--rb-top); }
@@ -1878,7 +1902,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-hrow .sc { font-weight: 700; font-size: var(--fs-item); font-variant-numeric: tabular-nums; text-align: right; }
 .imdbc-hrow .bar { background: var(--imdbc-panel-2); border-radius: 5px; height: 15px; overflow: hidden; }
 .imdbc-hrow .fill { display: block; height: 100%; border-radius: 5px; background: currentColor; min-width: 2px; }
-.imdbc-hrow .ct { font-size: var(--fs-small); color: var(--imdbc-muted); font-variant-numeric: tabular-nums; text-align: right; }
+/* Same grey as every other vote count on the site - this one sat a shade
+   brighter than the per-country counts directly below it. */
+.imdbc-hrow .ct { font-size: var(--fs-small); color: var(--imdbc-faint); font-variant-numeric: tabular-nums; text-align: right; }
 .imdbc-hrow .pc { font-size: var(--fs-small); color: var(--imdbc-faint); font-variant-numeric: tabular-nums; text-align: right; }
 
 .imdbc-hcountry { display: grid; grid-template-columns: 1fr 4em 8em; gap: 14px; align-items: center; padding: 9px 10px; border-radius: 8px; }
@@ -3676,7 +3702,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       parts.push(scoreTile({
         site: 'imdb', mark: MARKS.imdb, name: '',
         value: t.rating.toFixed(1), unit: '/10', band: ratingBand(t.rating, 10),
-        sub: compactNum(t.votes) + ' votes' + (t.topRank ? ` · #${t.topRank} of all time` : ''),
+        sub: [countText(t.votes, 'votes'), t.topRank ? `#${t.topRank} of all time` : ''].filter(Boolean).join(' · '),
         href: titleUrl(t.id) + 'ratings/'
       }));
     }
@@ -3697,7 +3723,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           site: 'tomato', mark: fresh ? MARKS.tomato : MARKS.splat,
           name: t.rt.critics.certified ? 'Certified Fresh' : 'Tomatometer',
           value: t.rt.critics.score, unit: '%',
-          sub: t.rt.critics.count ? num(t.rt.critics.count) + ' critics' : 'critics',
+          sub: countText(t.rt.critics.count, 'critics') || 'critics',
           href: t.rt.url, band: ratingBand(t.rt.critics.score, 100)
         }));
       }
@@ -3705,7 +3731,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         parts.push(scoreTile({
           site: 'popcorn', mark: MARKS.popcorn, name: 'Popcornmeter',
           value: t.rt.audience.score, unit: '%',
-          sub: t.rt.audience.banded || (t.rt.audience.count ? num(t.rt.audience.count) + ' ratings' : 'audience'),
+          sub: bandedCountText(t.rt.audience.banded, 'ratings')
+            || countText(t.rt.audience.count, 'ratings') || 'audience',
           href: t.rt.url, band: ratingBand(t.rt.audience.score, 100)
         }));
       }
@@ -3718,7 +3745,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         parts.push(scoreTile({
           site: 'letterboxd', mark: MARKS.letterboxd, name: 'Letterboxd',
           value: t.lbx.rating.toFixed(1), unit: '/' + (t.lbx.best || 5),
-          sub: t.lbx.count ? compactNum(t.lbx.count) + ' ratings' : 'members',
+          sub: countText(t.lbx.count, 'ratings') || 'members',
           href: t.lbx.url, band: ratingBand(t.lbx.rating, t.lbx.best || 5)
         }));
       }

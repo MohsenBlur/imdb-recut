@@ -33,8 +33,10 @@ function sliceDecl(name) {
   throw new Error('no end for const ' + name);
 }
 
-const NAMES = ['RATING_BANDS', 'ratingBand', 'THIN_VOTES', 'ratingClasses'];
-const M = new Function(NAMES.map(sliceDecl).join('\n\n') + '\nreturn {ratingBand, ratingClasses, THIN_VOTES};')();
+const NAMES = ['RATING_BANDS', 'ratingBand', 'THIN_VOTES', 'ratingClasses',
+  'compactNum', 'countText', 'bandedCountText'];
+const M = new Function(NAMES.map(sliceDecl).join('\n\n')
+  + '\nreturn {ratingBand, ratingClasses, THIN_VOTES, countText, bandedCountText};')();
 
 let fails = 0;
 const check = (label, ok, detail) => { if (!ok) fails++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? '  ' + detail : ''}`); };
@@ -84,6 +86,53 @@ for (const band of ['top', 'high', 'mid', 'low']) {
 }
 const darkBlock = css.slice(css.indexOf('html.imdbc-on.imdbc-dark'));
 check('dark theme redefines all four', ['top', 'high', 'mid', 'low'].every((b) => darkBlock.includes('--rb-' + b + ':')));
+
+console.log('\n[a count under a score reads the same way whatever site it came from]');
+// The strip used to print IMDb's "2.2M votes" beside Rotten Tomatoes' own
+// "250,000+ Ratings" and Letterboxd's "3.3M ratings" - three number styles and
+// two capitalisations across one row of tiles.
+check('votes are compacted', M.countText(2236430, 'votes') === '2.2M votes', M.countText(2236430, 'votes'));
+check('small counts are left alone', M.countText(271, 'critics') === '271 critics', M.countText(271, 'critics'));
+check('no count yields nothing, so the caller can fall back',
+  M.countText(0, 'votes') === '' && M.countText(undefined, 'votes') === '' && M.countText(null, 'votes') === '');
+
+check("RT's banded phrase is compacted and lowercased",
+  M.bandedCountText('250,000+ Ratings', 'ratings') === '250K+ ratings', M.bandedCountText('250,000+ Ratings', 'ratings'));
+check('the + is kept, because the number is a floor not a total',
+  M.bandedCountText('2,500,000+ Ratings', 'ratings') === '2.5M+ ratings', M.bandedCountText('2,500,000+ Ratings', 'ratings'));
+check('a banded phrase with no leading number is refused, not mangled',
+  M.bandedCountText('Fewer than 50 Ratings', 'ratings') === '', M.bandedCountText('Fewer than 50 Ratings', 'ratings'));
+for (const bad of ['', null, undefined, 'abc', '0 Ratings']) {
+  check(`${JSON.stringify(bad) || String(bad)} -> ""`, M.bandedCountText(bad, 'ratings') === '');
+}
+
+console.log('\n[the band colours the score, never the count beside it]');
+// "6.4 4.4K" in one green read as two ratings side by side.
+check('a neutral rule claims every .rt small',
+  /:where\(#imdbc-root\) \.rt small \{[^}]*color: var\(--imdbc-faint\)/.test(css),
+  (css.match(/\.rt small \{[^}]*\}/) || ['(no rule)'])[0].replace(/\s+/g, ' '));
+// A margin is not a word break: with the space removed the count sat against
+// the score with no character between them, so it copied and read aloud as
+// "9.33.2M".
+check('the count is separated by a real space, not only a margin',
+  css.includes('<small> ${compactNum('),
+  (css.match(/<small>.{0,20}/) || ['(none)'])[0]);
+check('no .rt small rule leans on a margin for that gap',
+  !/\.rt small \{[^}]*margin-left/.test(css));
+// <small> is relative, so the same count rendered at a different size in a
+// credit row than in a result row. One size, stated once.
+check('every count renders at one size, whatever row it sits in',
+  /\.rt small \{[^}]*font-size: var\(--fs-/.test(css),
+  (css.match(/\.rt small \{[^}]*\}/) || ['(no rule)'])[0].replace(/\s+/g, ' '));
+check('no band rule paints a whole .rt subtree with no exemption',
+  !/\.rb-(top|high|mid|low) \*/.test(css));
+// Every vote count on the site is the same grey, including the two that sit on
+// the ratings page one above the other.
+for (const sel of ['.imdbc-hrow .ct', '.imdbc-hcountry .ct']) {
+  const rule = new RegExp(sel.replace(/\./g, '\\.') + ' \\{[^}]*\\}').exec(css);
+  check(`${sel} uses the shared count grey`,
+    !!rule && /--imdbc-faint/.test(rule[0]), rule ? rule[0].replace(/\s+/g, ' ') : '(missing)');
+}
 
 console.log(`\n${fails === 0 ? 'ALL PASSED' : fails + ' FAILED'}`);
 process.exit(fails ? 1 : 0);
