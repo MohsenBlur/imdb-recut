@@ -1,0 +1,12 @@
+{
+  "name": "recut-tests",
+  "private": true,
+  "type": "module",
+  "description": "Test suites for Recut for IMDb. They slice the real functions out of recut.user.js and run them against the live services.",
+  "scripts": {
+    "test": "node load-test.mjs && node bands-test.mjs && node search-test.mjs && node letterboxd-test.mjs && node trakt-test.mjs && node rt-test.mjs && node gql-suite.mjs"
+  },
+  "dependencies": {
+    "linkedom": "^0.18.12"
+  }
+}

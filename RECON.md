@@ -1,0 +1,292 @@
+# IMDb / Rotten Tomatoes recon — observed 2026-09-14
+
+Everything below was **observed in a live browser**, not inferred. Anything not
+listed here was not verified.
+
+## 1. IMDb pages are Next.js with a full SSR payload
+
+`<script id="__NEXT_DATA__" type="application/json">` exists on both page types.
+`window.next.router` exists, so IMDb **does** client-side routing. `buildId`
+observed: `wQglpIp7ITqejhDt2ZrRt` — changes on every deploy, never hardcode it.
+
+### Title page — `props.pageProps`
+
+- `aboveTheFoldData`: `titleText`, `originalTitleText`,
+  `titleType{id,text,isSeries,canHaveEpisodes}`, `releaseYear{year,endYear}`,
+  `runtime{seconds,displayableProperty}`, `certificate{rating}`, `genres.genres[]`,
+  `plot.plotText.plainText`, `primaryImage{url,width,height}`,
+  `ratingsSummary{aggregateRating,voteCount,topRanking{rank}}`,
+  `metacritic.metascore.score`, `series` (null for movies), `principalCreditsV2[]`,
+  `featuredReviews.edges[]`, `castV2` (4 credits, names only — not useful).
+- `mainColumnData`: `castV2[0]{grouping.text, totalCredits, credits[18]}` — the real
+  cast, `crewV2[]`, `episodes{...}`, `moreLikeThisTitles.edges[12]`, `reviews.total`,
+  `ratingsSummary`, `productionStatus`.
+
+Cast credit shape (observed, tt2624370):
+
+    credits[i] = { name: { id, nameText.text, primaryImage.url },
+                   creditedRoles.edges[].node.characters.edges[].node.name,
+                   episodeCredits { total, yearRange { year, endYear } } }
+
+`totalCredits` was 110 but only **18** shipped in SSR, so the full cast needs GraphQL.
+
+Episodes (tt2624370, observed): `episodes.episodes.total = 27`,
+`episodes.seasons = [{number:1},{number:2},{number:3}]`,
+`episodes.displayableSeasons.edges[].node.season = "1"|"2"|"3"`,
+`episodes.isOngoing = false`. Per-season counts are **not** in SSR — GraphQL only (§2).
+
+### Name page — `props.pageProps`
+
+- `aboveTheFold`: `nameText`, `primaryImage`, `bio`, `professions`,
+  `primaryProfessions`, `birthDate`, `deathDate`, `deathStatus`,
+  `knownForV2.credits[]` (title text only — weak).
+- `mainColumnData`: `knownForFeatureV2.credits[4]` — **rich** known-for (poster,
+  rating, year, genres, character), `creditSummary.totalCredits.total` (510 for
+  nm0000704), `groupings.edges[]` (category list + totals), `released.edges[]`,
+  `unreleased.edges[]`, `birthLocation`, `deathLocation`, `height`, `akas`.
+
+`released.edges[].node` = `{grouping:{text}, credits:{total, edges:[max 15]}}`.
+Observed groups for nm0000704: Actor 128, Producer 24, Additional Crew 2,
+Soundtrack 4, Director 1, Second Unit 1, Camera 1, Voice Dubbing 1, Thanks 10,
+Self 283, Archive Footage 48.
+**Only 15 per group ship in SSR**, including on `/fullcredits/` — which 302s to
+`/name/<id>/?showAllCredits=true` and *still* ships 15. Full list needs GraphQL.
+
+Credit node shape (observed):
+
+    { title: { id, titleText.text, titleType{id,text,canHaveEpisodes},
+               primaryImage.url, ratingsSummary{aggregateRating,voteCount},
+               releaseYear{year,endYear}, runtime.seconds,
+               titleGenres.genres[].genre.text, series },
+      creditedRoles.edges[].node: {
+               text, attributes[].text, category{text,traits},
+               characters.edges[].node.name,
+               episodeCredits{ total, yearRange,
+                               displayableSeasons{total, edges[].node.season} } } }
+
+`category.traits` observed: `CAST_TRAIT`, `CREW_TRAIT`, `SELF_TRAIT`,
+`MAJOR_CREATIVE_INPUT_TRAIT`, `UNCATEGORIZED_TRAIT`, `ADDITIONAL_APPEARANCES_TRAIT`.
+
+## 2. IMDb public GraphQL — `https://api.graphql.imdb.com/`
+
+Open, no auth, GET with `?query=<urlencoded>`. Introspection is **blocked**
+("Unauthorized introspection request") but field queries work. The response carries
+a disclaimer limiting use to non-commercial/personal use — this script is personal use.
+
+Verified working queries:
+
+- **Full person credits, newest first** (default order is already newest-first):
+  `{name(id:"nm..."){creditsV2(first:250){total pageInfo{hasNextPage endCursor} edges{node{...}}}}}`
+  - `first:250` returned exactly 250, so 250 is an accepted page size.
+  - `sort:` is **not** an argument on `Name.creditsV2` (error: `Unknown argument "sort"`).
+  - Every nested connection needs its own `first:` or the query errors with
+    *Query must have exactly one of 'first' or 'last' parameters*.
+  - `creditsV2.total` = 484 while the name page's `creditSummary` said 510/513. The
+    two counts differ; do not present them as the same number.
+
+- **Full title cast**:
+  `{title(id:"tt..."){credits(first:N, filter:{categories:["cast"]}){total pageInfo{...} edges{node{name{id nameText{text} primaryImage{url}} ... on Cast{characters{name} episodeCredits(first:1){total yearRange{year endYear}} attributes{text}}}}}}}`
+  - `characters` is not on `Credit`; it requires the `... on Cast` inline fragment.
+  - Here `characters` and `attributes` are **plain arrays**, not connections — unlike
+    the name-page shape. The two schemas differ; do not share a parser.
+
+- **Reviews**: `{title(id:"tt..."){reviews(first:N, sort:{by:X, order:DESC}){total edges{node{id author{nickName userId} summary{originalText} text{originalText{plainText}} authorRating submissionDate helpfulness{upVotes downVotes} spoiler}}}}}`
+  - `ReviewsSortBy` values **verified by probe**: `TOTAL_VOTES`, `HELPFULNESS_SCORE`,
+    `USER_RATING`, `SUBMISSION_DATE`. `HELPFULNESS` and `REVIEW_VOLUME` are invalid.
+
+- **Per-season episode counts** (aliased, one round trip):
+  `{title(id:"tt..."){episodes{ s1:episodes(first:0,filter:{includeSeasons:["1"]}){total} ... }}}`
+  Verified tt2624370 → s1:9, s2:9, s3:9 (total 27).
+
+- `metacritic{metascore{score reviewCount}}`, `ratingsSummary{topRanking{rank}}`,
+  `moreLikeThisTitles(first:N)` and `productionStatus` all verified on tt0120737
+  (Metascore 92 from 34 reviews, IMDb 8.9 from 2,236,310 votes, Top Rated rank 8).
+
+## 3. Image resizing (verified)
+
+`url.replace(/\._V1_.*?(\.\w+)$/, '._V1_QL75_UX<W>_CR0,0,<W>,<H>_$1')` returns a real
+resized JPEG. Verified on three URL shapes, including one that already carried a
+`_CR2,0,1574,2361_` segment. 140×207 thumbs came back at 5–10 KB versus multi-MB
+originals.
+
+## 4. Rotten Tomatoes
+
+- RT search **is server-rendered** — raw HTML from
+  `https://www.rottentomatoes.com/search?search=<q>` contains `<search-page-media-row>`
+  elements, so `DOMParser` works. 20 rows observed for one query.
+- Results split into `<search-page-result type="movie">` and `type="tvSeries">`.
+- **Attribute names differ between the two blocks** (observed on the same page):
+  - movie rows: `release-year`, `tomatometer-score`, `tomatometer-sentiment`,
+    `tomatometer-is-certified`
+  - tvSeries rows: `startyear`, `endyear`, `releaseyear`, `tomatometerscore`,
+    `tomatometersentiment`
+
+  A matcher must accept both spellings.
+- Search rows carry **no audience score**. Only the title page has it.
+- Title page has `<script id="media-scorecard-json" type="application/json">` holding
+  `criticsScore{score,averageRating,reviewCount,certified,sentiment}` and
+  `audienceScore{score,averageRating,likedCount,reviewCount,sentiment}`. Verified on
+  `/m/the_lord_of_the_rings_the_fellowship_of_the_ring`: Tomatometer 91 (avg 8.80,
+  271 reviews, certified), Popcornmeter 95 (avg 4.1).
+- **rottentomatoes.com wraps `window.fetch`** with bot detection (`rt-common.js`) that
+  throws on cross-origin calls. Irrelevant to a userscript using `GM_xmlhttpRequest`,
+  but it meant recon had to run from the imdb.com origin.
+- "Granite Flats" (tt2624370) has **no RT entry at all** — a real no-match case.
+
+### Better than search: Wikidata gives the exact RT slug
+
+`SELECT ?rt WHERE { ?item wdt:P345 "tt0120737" . ?item wdt:P1258 ?rt . }` against
+`https://query.wikidata.org/sparql?format=json&query=...` returned
+`m/the_lord_of_the_rings_the_fellowship_of_the_ring` in 7 ms. P345 = IMDb ID,
+P1258 = Rotten Tomatoes ID. Exact mapping, no fuzzy title matching. Fall back to RT
+search only when Wikidata has no P1258.
+
+## 5. Not verified / deliberately unknown
+
+- Whether `first:250` is the hard ceiling for `creditsV2` (250 worked; 1000 untested).
+- Behaviour when logged in to IMDb — recon ran logged out. Ratings widgets and
+  watchlist state may add SSR fields; none of the fields used here should change.
+- RT scores for TV **seasons** (RT scores seasons separately). Only series-level
+  `/tv/<slug>` was checked.
+
+## 6. Corrections and additions, verified 2026-09-14 (second round)
+
+These were all found *after* the script was installed in a real browser, and
+every one of them invalidates something section 2 implied.
+
+### The GraphQL endpoint rejects userscript requests unless you identify the client
+
+Recon in section 2 ran `fetch()` from an open imdb.com page, so the browser
+attached `Referer: https://www.imdb.com/...` automatically. `GM_xmlhttpRequest`
+sends no Referer, and the endpoint answers **403 Forbidden** (an nginx HTML
+page, not a GraphQL error). Probed matrix:
+
+| headers | result |
+| --- | --- |
+| none / `Accept` / `Accept` + `Content-Type` / `User-Agent` / `+Origin` | **403** |
+| `Referer` alone, `x-imdb-client-name` alone | 415 "Invalid content type" |
+| `Content-Type: application/json` **and** (`Referer` or `x-imdb-client-name`) | **200** |
+
+So two gates, not one. The script sends
+`Content-Type: application/json` + `x-imdb-client-name: imdb-web-next`.
+`x-imdb-client-name` is preferred over `Referer` because `Referer` is a
+forbidden XHR header that not every userscript manager will set.
+
+**The lesson worth keeping: section 2 was verified in the wrong configuration.**
+A green result from the page's own `fetch()` says nothing about the same request
+made from a userscript.
+
+### A creditsV2 node can carry several credited roles
+
+Section 2 implied one role per credit. Probed across four people:
+
+| person | nodes | multi-role nodes | max roles on one node |
+| --- | --- | --- | --- |
+| Elijah Wood | 250 | 23 | 4 |
+| Clint Eastwood | 250 | 34 | 5 |
+| Ben Affleck | 250 | 31 | 4 |
+| Jordan Peele | 231 | 27 | 16 |
+
+Ben Affleck's *Animals* is a single node whose roles are
+`Producer + Actor + Writer + Director`. Reading only `creditedRoles.edges[0]`
+files such a title under one category and undercounts every other tab.
+`creditedRoles(first: 12)` covers all observed cases.
+
+### episodeCredits sits in two different places
+
+- Page payload (`released.edges[].node`): `episodeCredits` is a sibling of
+  `creditedRoles`, i.e. **on the credit node**.
+- `creditsV2` as queried here: `episodeCredits` is **under the role**.
+
+Verified on Yellowjackets: `episodeCredits on node? false | on role? true`.
+A parser that reads only one of the two silently drops every episode count.
+
+### topRanking exists only in mainColumnData
+
+On tt0120737, `aboveTheFoldData.ratingsSummary` is exactly
+`{aggregateRating, voteCount, __typename}` — no `topRanking`. Only
+`mainColumnData.ratingsSummary` carries `topRanking.rank` (8). An
+`aboveTheFold || mainColumn` fallback therefore loses the Top-250 rank on every
+title.
+
+### Page sizes and shapes confirmed at scale
+
+- `title.credits` paginates correctly: 158 cast for tt0120737, 110 for tt2624370.
+- `title.reviews` accepts all four verified sort enums; `after:`/`endCursor`
+  pages are disjoint. tt0120737 reports 6,086 reviews.
+- 36 aliased per-season subqueries in one request works (The Simpsons, 789 eps).
+- `name.creditsV2` full fetch: 484 (Elijah Wood) / 545 (Affleck) / 649
+  (Eastwood) in 2-3 requests of 250.
+
+### IMDb is behind a WAF for non-browser clients
+
+Server-side `fetch()` of an IMDb **page** returns a 202 AWS WAF challenge
+(~2 KB, no `__NEXT_DATA__`) regardless of headers. `api.graphql.imdb.com` is
+**not** behind it. Rotten Tomatoes and Wikidata are not either. This is why the
+page HTML can only be read from inside a real browser session.
+
+### Rotten Tomatoes matching, measured
+
+Wikidata P345 -> P1258 resolved correctly for every title tried, and RT search
+independently agreed each time: LOTR Fellowship, Yellowjackets, Ghostbusters
+(1984), Interstellar (`m/interstellar_2014` — the slug carries a year the title
+does not), Breaking Bad. Granite Flats correctly produced no match from either
+route. An invented title is refused.
+
+RT has no page for `tvEpisode`, `videoGame` or podcast types — searching for
+one returns whatever film shares the name. Episodes are looked up via their
+parent series instead (verified: Breaking Bad's *Felina* shows 96% / 97%).
+
+### Browser-side gotcha that is not about IMDb at all
+
+The CSS resets were written as `#imdbc-root a {...}` / `#imdbc-root button {...}`.
+An id selector outranks any later class rule, so `.imdbc-btn.is-on` could set the
+background but not the text colour — the selected tab rendered its label in its
+own background colour. `:where(#imdbc-root)` drops the id's specificity to zero
+and fixes the whole class of problem.
+
+## 7. Letterboxd, and the image-crop trap (observed 2026-09-14, third round)
+
+### Amazon's `_CR_` directive pads, it does not crop
+
+Measured on a real headshot (source 1000x1178, asked for a 180x270 box):
+
+| request | returned | note |
+| --- | --- | --- |
+| `._V1_QL75_UX180_CR0,0,180,270_.jpg` | 180x270, 4529 B | **white bars baked in** |
+| `._V1_QL75_UX180_.jpg` | 180x212, 4221 B | too short for the box |
+| `._V1_QL75_UY270_.jpg` | 230x270, 5838 B | covers the box; CSS crops |
+
+So `_CR_` letterboxes with white when the scaled image is smaller than the crop
+box, and that white is part of the JPEG — no CSS can remove it. Never crop
+server-side. Scale along the axis that makes the image cover the box:
+
+- source aspect **>** box aspect (relatively wider) -> `UY{h}`
+- source aspect **<** box aspect (relatively taller) -> `UX{w}`
+- unknown -> `UY{h}` is the safer default for a portrait box
+
+The dimensions needed to choose are in the payloads (`primaryImage.width/height`)
+and can be asked for in GraphQL (`primaryImage { url width height }`).
+
+### Letterboxd
+
+- `https://letterboxd.com/imdb/<tt-id>/` answers **302** to `/film/<slug>/` for
+  films, features and shorts alike (verified tt0120737, tt0000012). For a TV
+  series, an episode, or an unknown id it answers **200 with no redirect**
+  (verified tt2624370, tt2301455, tt99999999) — so an unfiltered button lands on
+  a not-found page. Gate on title type.
+- The film page carries `<script type="application/ld+json">` with
+  `aggregateRating`: `ratingValue` (out of `bestRating` 5), `ratingCount`,
+  `reviewCount`. Verified on Fellowship: 4.39 from 3,252,529 ratings.
+- **The JSON-LD is wrapped in CDATA comments** (`/* <![CDATA[ */ … /* ]]> */`),
+  so it must be stripped before `JSON.parse`.
+- One request serves both the link and the rating; no need to fetch twice.
+
+### A cached value that changes shape is invisible to a TTL
+
+v1.5.0 cached the Letterboxd result as a bare URL string. v1.6.0 expected an
+object and read `.rating` off a string — `undefined`, so the tile silently did
+not render, on an entry with 30 days left to live. TTLs expire stale *data*;
+they do nothing about stale *shape*. The disk cache prefix now carries a schema
+version (`cache:v2:`) that is bumped whenever a cached value's shape changes, and
+readers check the shape anyway.
