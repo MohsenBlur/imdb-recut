@@ -1,180 +1,120 @@
 # Recut for IMDb
 
-A userscript that replaces IMDb's pages with a dense, quiet layout.
+A userscript that rebuilds IMDb's pages from IMDb's own data: cast with the
+characters played, complete filmographies, ratings from five sources, where to
+watch — and none of the ads, players, carousels or upsells.
 
-It doesn't hide IMDb's markup with CSS. It reads IMDb's own data payload and
-renders its own page, so the ads, video players, carousels and upsells are never
-built in the first place.
+It doesn't hide IMDb's markup with CSS. It reads the page's data payload and
+renders its own layout, so the clutter is never built in the first place.
 
-[**Install**](#install) · [What it covers](#what-it-covers) · [How it works](#how-it-works) · [Tests](#tests)
+## Install
+
+**1. Get a userscript manager**
+
+| | Chrome / Brave / Vivaldi | Firefox | Edge | Safari |
+| --- | --- | --- | --- | --- |
+| **Tampermonkey** | [install](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) | [install](https://addons.mozilla.org/firefox/addon/tampermonkey/) | [install](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) | [install](https://apps.apple.com/app/tampermonkey/id1482490089) |
+| **Violentmonkey** | [install](https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag) | [install](https://addons.mozilla.org/firefox/addon/violentmonkey/) | [install](https://microsoftedge.microsoft.com/addons/detail/violentmonkey/eeagobfjdenkkddmbclomhiblgggliao) | — |
+
+**2. → [Install Recut](https://github.com/MohsenBlur/imdb-recut/raw/main/recut.user.js) ←**
+
+Your manager will intercept that link and offer to install. Open any IMDb page.
+On first use it asks permission to reach `api.graphql.imdb.com`,
+`query.wikidata.org`, `rottentomatoes.com`, `letterboxd.com` and `trakt.tv` —
+that's the ratings, links and full cast/credits data. Decline any of them and
+the page still works, with less on it.
+
+Everything that puts something on screen has a toggle in **Settings** (top bar),
+including the homepage takeover, so it can be cut back further than the defaults.
+**Original page** in the top bar shows you IMDb's real page instantly.
 
 ---
-
-### A film
-
-Ratings from five sources in one strip, the full cast with characters, and
-external links that are only shown when they actually resolve.
 
 ![A film page](docs/screenshots/title.png)
-
-### Trailers and photos, without the bloat
-
-One line: a small trailer preview and counts for the video and photo galleries.
-Nothing expands until it is clicked. The trailer then plays inline from IMDb's
-own MP4 sources rather than an embedded player, and photos open straight into a
-keyboard-navigable lightbox without ever occupying page space.
-
-![The media row](docs/screenshots/media.png)
-
-### A person
-
-The *complete* filmography — not the 15-per-category IMDb ships in the page —
-with the character played on every row, category tabs, filtering and sorting.
-
-![A person page](docs/screenshots/person.png)
-
-### Ratings, episodes, charts
-
-![The ratings breakdown](docs/screenshots/ratings.png)
-
-![An episode list](docs/screenshots/episodes.png)
-
-![The Top 250](docs/screenshots/chart.png)
-
----
 
 ## What it covers
 
 | Page | What you get |
 | --- | --- |
-| `/title/tt…` | IMDb score, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer and video strip · full cast with characters and per-actor episode counts · sortable, paginated user reviews · seasons with per-season episode counts · photos · more-like-this · Letterboxd and Trakt links |
-| `/name/nm…` | Known-for · the complete filmography with characters, category tabs, filter and sort · videos and photos |
-| `/title/tt…/ratings` | 1–10 histogram and per-country breakdown |
-| `/title/tt…/fullcredits` | Every cast member and crew department |
-| `/title/tt…/episodes` | Season tabs, stills, air dates, ratings, plots |
-| `/title/tt…/reviews` | The full review list, four sort orders |
-| `/find`, `/search/title` | Search results as rows, plus type-ahead in the header |
-| `/chart/…`, `/list/ls…` | Top 250, other charts, and user lists |
+| `/title/tt…` | IMDb, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer · full cast with characters · sortable user reviews · seasons and per-season episode counts · photos · more-like-this · Letterboxd and Trakt links |
+| `/name/nm…` | Known-for, then the *complete* filmography with the character played on every row, category tabs, filter and sort |
+| `…/ratings` `…/fullcredits` `…/episodes` `…/reviews` | Rating histogram and per-country breakdown · every cast and crew member · season tabs with stills · the full review list |
+| `/find` `/search/title` | Results as rows, plus type-ahead in the header |
+| `/chart/…` `/list/ls…` | Top 250, other charts, user lists |
+| `/` | A launcher: search and the places worth going |
 
-Every rating on every page is colour-banded on one scale — **≥8.0 green ·
-7.0–7.9 lime · 6.0–6.9 amber · below 6.0 red** — so a filmography can be skimmed
-without reading numbers. Ratings from fewer than 1,000 votes are dimmed, so an
-obscure 9.8 from 14 votes doesn't outshout a classic.
+Every rating is colour-banded on one scale — **≥8.0 green · 7.0–7.9 lime ·
+6.0–6.9 amber · below 6.0 red** — so a filmography can be skimmed without
+reading numbers. Ratings from under 1,000 votes are dimmed, so an obscure 9.8
+from 14 votes doesn't outshout a classic. The cookie banner is hidden and
+**declined** on every IMDb page.
 
-**Where to watch** comes from IMDb's own watch options, so there is no third
-party, no API key and no attribution requirement - and because the request is
-made from your browser, IMDb geolocates it to *your* country, with prices in
-your currency.
+<details>
+<summary>More screenshots</summary>
 
-IMDb serves language-prefixed paths for non-English users (`/de/title/…`,
-`/es/name/…`). Those are recognised, and every link the script builds keeps the
-prefix so you stay in your own language.
+![A person page](docs/screenshots/person.png)
+![Trailers and photos](docs/screenshots/media.png)
+![Ratings breakdown](docs/screenshots/ratings.png)
+![Episode list](docs/screenshots/episodes.png)
+![Top 250](docs/screenshots/chart.png)
 
-The cookie consent banner is hidden and **declined** on every IMDb page, not
-just the ones that get rewritten.
-
-## Install
-
-**1. Install a userscript manager**
-
-| | Chrome / Brave / Vivaldi | Firefox | Edge | Safari |
-| --- | --- | --- | --- | --- |
-| **Tampermonkey** (recommended) | [install](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) | [install](https://addons.mozilla.org/firefox/addon/tampermonkey/) | [install](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) | [install](https://apps.apple.com/app/tampermonkey/id1482490089) |
-| **Violentmonkey** | [install](https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag) | [install](https://addons.mozilla.org/firefox/addon/violentmonkey/) | [install](https://microsoftedge.microsoft.com/addons/detail/violentmonkey/eeagobfjdenkkddmbclomhiblgggliao) | — |
-
-Greasemonkey is untested. It only implements the promise-based `GM.*` API, and
-while the script falls back to it, nothing here has been verified under it.
-
-**2. [Install Recut](https://github.com/MohsenBlur/imdb-recut/raw/main/recut.user.js)**
-
-Your manager intercepts that `.user.js` link and shows an install prompt. Then
-open any IMDb page.
-
-On first use it asks permission to reach `api.graphql.imdb.com`,
-`query.wikidata.org`, `rottentomatoes.com`, `letterboxd.com` and `trakt.tv`.
-
-## Settings
-
-Top bar → **Settings**: theme (auto/dark/light), Rotten Tomatoes lookups,
-where-to-watch, trailers, photos, full-cast and full-filmography loading, hiding
-"Self" and archive-footage credits, cookie-banner handling, reviews per page.
-
-Everything that puts something on screen has a toggle, so the layout can be cut
-back further than the defaults.
-
-**Original page** in the top bar reveals IMDb's real page instantly, and a
-floating button brings the clean view back. Tampermonkey's menu has the same
-toggle for pages the script doesn't take over.
+</details>
 
 ## How it works
 
-1. **IMDb's page payload** (`__NEXT_DATA__`) — instant, no network. Enough to
-   paint the whole page immediately.
-2. **IMDb's public GraphQL API** for what IMDb withholds from the page: the full
-   cast (the page ships ~18 of 158), the full filmography (15 per category), the
-   review list, per-season episode counts. Results are cached to disk for six
-   hours, bounded to 80 entries with LRU eviction.
-3. **Wikidata → Rotten Tomatoes, Letterboxd and Trakt.** One SPARQL query maps
-   the IMDb id to exact ids on all three (P1258, P8013/P12492), so there is no
-   fuzzy title matching. Rotten Tomatoes' search page is a fallback that refuses
-   to guess rather than show a same-named film from another decade.
+1. **IMDb's page payload** (`__NEXT_DATA__`) — instant, no network, enough to
+   paint the whole page.
+2. **IMDb's public GraphQL API** for what the page withholds: the full cast (it
+   ships ~18 of 158), the full filmography (15 per category), reviews,
+   per-season episode counts, and where-to-watch. Cached to disk for six hours,
+   bounded to 80 entries.
+3. **Wikidata** maps the IMDb id to exact Rotten Tomatoes, Letterboxd and Trakt
+   ids in one query, so nothing is matched by guessing at titles.
 
-Every request goes through `GM_xmlhttpRequest`, so page CSP and Rotten Tomatoes'
-bot-detection wrapper around `window.fetch` are both irrelevant.
+Where-to-watch is IMDb's own data, so there's no third party and no API key —
+and since the request comes from your browser, it's already your country and
+your currency. Requests go through `GM_xmlhttpRequest`, so page CSP and Rotten
+Tomatoes' bot-detection wrapper around `window.fetch` don't apply. If the API is
+unreachable the page still renders and says so, rather than quietly showing a
+short list under a large number.
 
-If the API is unreachable the page still renders from the payload and *says so*,
-rather than quietly showing a short list under a large number.
+IMDb serves language-prefixed paths (`/de/title/…`). Those are recognised, and
+every link keeps the prefix so you stay in your own language.
 
 ## Tests
 
-`test/` holds suites that slice the **real** functions out of `recut.user.js` —
-they are not copies, so they fail when the script drifts — and run them against
-live IMDb, Rotten Tomatoes, Wikidata, Letterboxd and Trakt.
+The suites in `test/` slice the **real** functions out of `recut.user.js` — not
+copies, so they fail when the script drifts — and run them against the live
+services.
 
 ```bash
-cd test && npm install && for f in *-test.mjs gql-suite.mjs; do node "$f"; done
+cd test && npm install && npm test
 ```
 
-- `load-test.mjs` — executes the whole script in a synthetic DOM across twelve
-  URLs. `node --check` only parses; this catches a temporal-dead-zone error or a
-  typo'd identifier, either of which would kill the script on every page.
-- `gql-suite.mjs` — cast pagination, all four review sort enums, cursor
-  disjointness, 36 aliased season subqueries in one request, multi-role credits.
-- `rt-test.mjs`, `letterboxd-test.mjs`, `trakt-test.mjs` — resolution against the
-  live services, each including **known-bad probes that must be refused**, not
-  guessed.
-- `bands-test.mjs` — every rating-band boundary on all four score scales.
-- `search-test.mjs` — search normalising, plus a hostile title that must not
-  produce an element.
+`load-test.mjs` executes the whole script in a synthetic DOM across twelve URLs;
+`node --check` only parses, and this catches the errors that would kill it on
+every page. The Rotten Tomatoes, Letterboxd and Trakt suites each include
+**known-bad probes that must be refused**, not guessed.
 
-`tools/shots.mjs` regenerates the screenshots above by rendering the real script
-against real IMDb data in headless Chrome. `test/preview.mjs` builds a page of
-every component, viewable at any width — which is how the phone layout gets
-checked, since Chrome won't make a window narrower than about 500px.
-
-`RECON.md` records what was actually measured about these sites' data shapes,
-including the things that turned out to be wrong the first time. Read it before
-changing a query.
+`tools/shots.mjs` regenerates the screenshots by running the real script against
+real IMDb data in headless Chrome. `test/preview.mjs` builds every component on
+one page at any width — how the phone layout gets checked, since Chrome won't
+make a window narrower than ~500px. `RECON.md` records what was measured about
+these sites' data shapes, including what turned out to be wrong the first time.
 
 ## Limits
 
-- IMDb's GraphQL API is undocumented and unversioned. If IMDb changes it, the
-  supplementary data degrades to what the page payload holds; the page keeps
-  working.
-- Trakt's web app returns HTTP 200 for every path, including ones that don't
-  exist, so a link can't be validated by fetching it. The Trakt button appears
-  only when Wikidata has a real id — no guessed slugs.
-- Letterboxd is films-only. Trakt covers films, series and mini-series.
-- IMDb's video playback URLs are signed and expire, so they are held in memory
-  for the life of the page and never written to the cache.
-- Signed-in features (your own ratings, watchlist) are not carried over.
-- On a language-prefixed page the layout follows your language, but titles
-  fetched from the API come back in English, so a filmography can mix the two.
-- `/name/*/bio`, `/awards` and `/user/*/ratings` are still IMDb's own pages.
+- IMDb's API is undocumented. If it changes, the extra data degrades to what the
+  page payload holds and the page keeps working.
+- Trakt returns HTTP 200 for every path including nonexistent ones, so its links
+  can't be validated by fetching. The button appears only when Wikidata has a
+  real id. Letterboxd is films-only; Trakt covers films, series and mini-series.
+- Signed-in features (your ratings, watchlist) aren't carried over.
+- On a language-prefixed page the layout follows your language, but titles from
+  the API come back in English, so a filmography can mix the two.
+- `/name/*/bio`, `/awards` and `/user/*` are still IMDb's own pages.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
-
-Not affiliated with IMDb. Uses IMDb's public endpoints for personal,
-non-commercial use, per their stated terms.
+MIT — see [LICENSE](LICENSE). Not affiliated with IMDb. Uses IMDb's public
+endpoints for personal, non-commercial use.

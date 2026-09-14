@@ -67,7 +67,7 @@ const PRE = `
 `;
 
 const NAMES = ['num', 'compactNum', 'runtimeText', 'yearText', 'imgSize', 'thumb', 'imdbUrl', 'titleUrl', 'nameUrl', 'initials',
-  'RATING_BANDS', 'ratingBand', 'THIN_VOTES', 'ratingClasses',
+  'RATING_BANDS', 'ratingBand', 'THIN_VOTES', 'ratingClasses', 'typeLabel',
   'findUrl', 'normaliseSearch', 'searchTitleRow', 'searchNameRow'];
 const EXPORTS = ['normaliseSearch', 'searchTitleRow', 'searchNameRow', 'findUrl', 'interpolate', 'thumb', 'imgSize',
   'titleUrl', 'nameUrl', 'setLocale'];

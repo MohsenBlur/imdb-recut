@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.7.0
+// @version      2.8.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -76,6 +76,9 @@
       }
       return { kind, id: m[1], season, sub: m[2], routeId: m[1] + ':' + m[2] + ':' + season };
     }
+    if (settings.cleanHomepage && (pathname === '/' || pathname === '')) {
+      return { kind: 'home', id: 'home', routeId: 'home' };
+    }
     m = /^\/chart\/([a-z0-9-]+)\/?$/.exec(pathname);
     if (m && CHARTS[m[1]]) return { kind: 'chart', id: m[1], routeId: 'chart:' + m[1] };
     m = /^\/list\/(ls\d+)\/?$/.exec(pathname);
@@ -107,6 +110,7 @@
     fullCredits: { def: true, label: 'Load the complete filmography' },
     hideSelfCredits: { def: true, label: 'Hide "Self" and archive-footage credits by default' },
     declineCookies: { def: true, label: 'Hide and decline the cookie banner' },
+    cleanHomepage: { def: true, label: 'Replace the IMDb homepage' },
     watchOptions: { def: true, label: 'Show where to watch' },
     trailers: { def: true, label: 'Show trailers and videos' },
     photos: { def: true, label: 'Show photos' },
@@ -497,6 +501,7 @@
       const e = pp.contentData && pp.contentData.entityMetadata;
       return !!(e && e.id === route.id);
     }
+    if (route.kind === 'home') return !!pp.pageQueryData;
     if (route.kind === 'chart') return !!(pp.pageData && pp.pageData.chartTitles);
     if (route.kind === 'list') return !!(pp.mainColumnData && pp.mainColumnData.list);
     if (route.kind === 'titleSearch') return !!(pp.searchResults && pp.searchResults.titleResults);
@@ -511,7 +516,8 @@
    * pull the destination page's HTML and read its payload instead.
    */
   async function fetchPageProps(route) {
-    const url = route.kind === 'search' ? findUrl(route.query, route.section)
+    const url = route.kind === 'home' ? imdbUrl('/')
+      : route.kind === 'search' ? findUrl(route.query, route.section)
       : route.sub ? titleUrl(route.id) + route.sub + '/' + (route.season ? '?season=' + encodeURIComponent(route.season) : '')
       : (route.kind === 'chart' || route.kind === 'list' || route.kind === 'titleSearch') ? listPageUrl(route)
       : route.kind === 'title' ? titleUrl(route.id) : nameUrl(route.id);
@@ -1646,6 +1652,18 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-ext { display: inline-flex; align-items: center; gap: 9px; padding: 8px 14px; }
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
 
+/* ── homepage launcher ─────────────────────────────────────────────────── */
+.imdbc-home { padding: 56px 0 8px; max-width: 760px; }
+.imdbc-home .imdbc-h1 { font-size: clamp(28px, 4vw, 44px); }
+.imdbc-home-search { margin: 22px 0 16px; display: flex; }
+.imdbc-home-search input {
+  width: 100%; padding: 14px 20px; border-radius: 999px; font: inherit;
+  font-size: var(--fs-lead); border: 1px solid var(--imdbc-border);
+  background: var(--imdbc-panel); color: var(--imdbc-text);
+}
+.imdbc-home-links { gap: 8px; }
+.imdbc-home .imdbc-result .po { display: none; }
+
 /* ── where to watch ────────────────────────────────────────────────────── */
 .imdbc-watchrow:empty { display: none; }
 .imdbc-watchrow { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; align-items: center; }
@@ -2166,6 +2184,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         title: li.titleText || li.originalTitleText || '',
         year: start ? (end && end !== start ? `${start}–${end}` : String(start)) : '',
         typeText: (li.titleType && li.titleType.text) || '',
+        typeId: (li.titleType && li.titleType.id) || '',
         certificate: li.certificate || '',
         genres: Array.isArray(li.genres) ? li.genres : [],
         plot: li.plot || '',
@@ -2203,7 +2222,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   function searchTitleRow(t) {
     const poster = thumb(t.poster, 96, 144, t.posterSize);
-    const bits = [t.year, t.typeText && t.typeText !== 'Movie' ? t.typeText : '', t.runtime, t.certificate].filter(Boolean);
+    const bits = [t.year, typeLabel(t), t.runtime, t.certificate].filter(Boolean);
     return html`
       <a class="imdbc-result" href="${titleUrl(t.id)}">
         <span class="po">${poster ? html`<img src="${poster}" alt="" loading="lazy" decoding="async">` : ''}</span>
@@ -2315,7 +2334,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   function subPageHeader(ent, activeKey) {
     const poster = thumb(ent.poster, 132, 198, ent.posterSize);
-    const bits = [ent.year, ent.typeText && ent.typeText !== 'Movie' ? ent.typeText : '', ent.runtime, ent.certificate].filter(Boolean);
+    const bits = [ent.year, typeLabel(ent), ent.runtime, ent.certificate].filter(Boolean);
     const tabs = SUB_PAGES
       .filter((t) => !t.seriesOnly || ent.isSeries)
       .map((t) => html`<a class="imdbc-btn${t.key === activeKey ? ' is-on' : ''}" href="${titleUrl(ent.id) + t.path}">${t.label}</a>`);
@@ -2588,6 +2607,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       year: start ? (end && end !== start ? `${start}–${end}` : String(start)) : '',
       startYear: start,
       typeText: (li.titleType && li.titleType.text) || '',
+      typeId: (li.titleType && li.titleType.id) || '',
       certificate: li.certificate || '',
       genres: Array.isArray(li.genres) ? li.genres : [],
       plot: li.plot || '',
@@ -2661,8 +2681,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
                   <span class="main">
                     <span class="ti">${t.title}</span>
                     <span class="mt">
-                      ${[t.year, t.typeText && t.typeText !== 'Movie' ? t.typeText : '', t.runtime, t.certificate].filter(Boolean).length
-                        ? html`<span>${[t.year, t.typeText && t.typeText !== 'Movie' ? t.typeText : '', t.runtime, t.certificate].filter(Boolean).join(' · ')}</span>` : ''}
+                      ${[t.year, typeLabel(t), t.runtime, t.certificate].filter(Boolean).length
+                        ? html`<span>${[t.year, typeLabel(t), t.runtime, t.certificate].filter(Boolean).join(' · ')}</span>` : ''}
                       ${typeof t.rating === 'number'
                         ? html`<span class="rt ${ratingClasses(t.rating, 10, t.votes)}">★ ${t.rating.toFixed(1)}<small> ${compactNum(t.votes)}</small></span>` : ''}
                       ${t.genres && t.genres.length ? html`<span>${t.genres.slice(0, 3).join(', ')}</span>` : ''}
@@ -3024,6 +3044,90 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     box.remove();
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // 12f. Homepage
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // IMDb's homepage loads its carousels client-side; the only real content in
+  // the payload is the weekend box office. So rather than invent a feed, this
+  // is a launcher: search, the places worth going, and the one chart IMDb
+  // actually ships. Everything else on that page is promotion.
+
+  const HOME_LINKS = [
+    { path: '/chart/top/', label: 'Top 250 movies' },
+    { path: '/chart/toptv/', label: 'Top 250 TV' },
+    { path: '/chart/moviemeter/', label: 'Popular movies' },
+    { path: '/chart/tvmeter/', label: 'Popular TV' },
+    { path: '/chart/boxoffice/', label: 'Box office' },
+    { path: '/search/title/?title_type=feature&sort=user_rating,desc&num_votes=25000,', label: 'Advanced search' }
+  ];
+
+  function normaliseHome(pp) {
+    const data = (pp.pageQueryData && pp.pageQueryData.data) || {};
+    const chart = data.boxOfficeWeekendChart || {};
+    const money = (g) => {
+      const t = g && g.total;
+      if (!t || typeof t.amount !== 'number') return '';
+      const m = t.amount;
+      const unit = m >= 1e9 ? [1e9, 'B'] : m >= 1e6 ? [1e6, 'M'] : m >= 1e3 ? [1e3, 'K'] : [1, ''];
+      const sym = t.currency === 'USD' ? '$' : t.currency === 'EUR' ? '€' : (t.currency ? t.currency + ' ' : '');
+      return sym + (m / unit[0]).toFixed(m / unit[0] >= 100 ? 0 : 1).replace(/\.0$/, '') + unit[1];
+    };
+    return {
+      weekend: (chart.entries || []).map((e) => ({
+        id: e.title && e.title.id,
+        title: (e.title && e.title.titleText && e.title.titleText.text) || '',
+        typeText: (e.title && e.title.titleType && e.title.titleType.text) || '',
+        typeId: (e.title && e.title.titleType && e.title.titleType.id) || '',
+        gross: money(e.weekendGross),
+        lifetime: money(e.title && e.title.lifetimeGross),
+        cinemas: (e.title && e.title.cinemas && e.title.cinemas.total) || 0
+      })).filter((e) => e.id && e.title)
+    };
+  }
+
+  function renderHome(root, home) {
+    root.innerHTML = interpolate(html`
+      ${topBar(imdbUrl('/'))}
+      <div class="imdbc-wrap">
+        <div class="imdbc-home">
+          <h1 class="imdbc-h1">IMDb, quietly</h1>
+          <form class="imdbc-home-search" action="${imdbUrl('/find/')}" method="get" role="search" autocomplete="off">
+            <input type="search" name="q" placeholder="Search films, shows and people"
+                   aria-label="Search IMDb" autocomplete="off" spellcheck="false" data-imdbc-home-q>
+          </form>
+          <div class="imdbc-tools imdbc-home-links">
+            ${HOME_LINKS.map((l) => html`<a class="imdbc-btn" href="${imdbUrl(l.path)}">${l.label}</a>`)}
+          </div>
+        </div>
+
+        ${home.weekend.length ? html`
+          <section class="imdbc-sec">
+            ${sectionHead('Box office this weekend', '')}
+            <div class="imdbc-results">
+              ${home.weekend.map((e, i) => html`
+                <a class="imdbc-result ranked" href="${titleUrl(e.id)}">
+                  <span class="rank">${i + 1}</span>
+                  <span class="po"></span>
+                  <span class="main">
+                    <span class="ti">${e.title}</span>
+                    <span class="mt">
+                      ${typeLabel(e) ? html`<span>${typeLabel(e)}</span>` : ''}
+                      ${e.gross ? html`<span><b>${e.gross}</b> this weekend</span>` : ''}
+                      ${e.lifetime ? html`<span>${e.lifetime} total</span>` : ''}
+                      ${e.cinemas ? html`<span>${num(e.cinemas)} cinemas</span>` : ''}
+                    </span>
+                  </span>
+                </a>`)}
+            </div>
+          </section>` : ''}
+      </div>`);
+
+    wireTopBar(root);
+    const q = root.querySelector('[data-imdbc-home-q]');
+    if (q) q.focus();
+  }
+
   function initials(name) {
     return String(name || '?').split(/\s+/).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('');
   }
@@ -3051,7 +3155,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   function titleCard(t) {
     const poster = thumb(t.poster, 180, 270, t.posterSize);
-    const bits = [t.year, t.typeText && t.typeText !== 'Movie' ? t.typeText : ''].filter(Boolean);
+    const bits = [t.year, typeLabel(t)].filter(Boolean);
     return html`
       <div class="imdbc-card">
         <a class="po" href="${titleUrl(t.id)}" tabindex="-1" aria-hidden="true">
@@ -3086,7 +3190,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
     const metaBits = [];
     if (t.year) metaBits.push(esc(t.year));
-    if (t.typeText && t.typeText !== 'Movie') metaBits.push(esc(t.typeText));
+    if (typeLabel(t)) metaBits.push(esc(typeLabel(t)));
     if (t.runtime) metaBits.push(esc(t.runtime));
     if (t.certificate) metaBits.push(esc(t.certificate));
     if (t.productionStage && t.productionStage !== 'Released') metaBits.push(esc(t.productionStage));
@@ -3641,12 +3745,29 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   }
 
   const CREDIT_PAGE = 60;
+  // Categories worth hiding by default. IMDb localises category.text, so match
+  // on traits, which are language-independent; the English names remain only as
+  // a fallback for the page payload's group labels, which carry no traits.
+  const NOISE_TRAITS = /^(SELF_TRAIT|THANKS_TRAIT|ADDITIONAL_APPEARANCES_TRAIT)$/;
   const NOISE_CATEGORIES = /^(self|archive footage|thanks)$/i;
+
+  function isNoiseCategory(credit, category) {
+    const traits = (credit && credit.traits) || [];
+    if (traits.length) return traits.some((t) => NOISE_TRAITS.test(t));
+    return NOISE_CATEGORIES.test(category || '');
+  }
+
+  /** IMDb localises type names, so decide on the id and display the text. */
+  function typeLabel(x) {
+    if (!x || !x.typeText) return '';
+    const isFilm = x.typeId ? x.typeId === 'movie' : x.typeText === 'Movie';
+    return isFilm ? '' : x.typeText;
+  }
   const ALL_CATEGORIES = '--all-credits--';
 
   function creditRow(c) {
     const poster = thumb(c.poster, 88, 132, c.posterSize);
-    const type = c.typeText && c.typeText !== 'Movie' ? c.typeText : '';
+    const type = typeLabel(c);
 
     let role = '';
     if (c.characters && c.characters.length) role = interpolate(html`as <b>${c.characters.join(' / ')}</b>`);
@@ -3699,6 +3820,13 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       shown: CREDIT_PAGE
     };
 
+    // Category labels seen on noise credits, collected as the list is parsed so
+    // the default tab choice works in any language.
+    const NOISE_TRAIT_LABELS = new Set();
+    for (const c of p.credits) {
+      for (const k of creditCategories(c)) if (isNoiseCategory(c, k)) NOISE_TRAIT_LABELS.add(k);
+    }
+
     function categories() {
       const counts = new Map();
       for (const c of state.all) {
@@ -3715,7 +3843,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     function defaultCategory(cats) {
       const acting = cats.find(([k]) => /^actor$|^actress$|^acting$/i.test(k));
       if (acting) return acting[0];
-      const meaty = cats.find(([k]) => !NOISE_CATEGORIES.test(k));
+      const meaty = cats.find(([k]) => !NOISE_CATEGORIES.test(k) && !NOISE_TRAIT_LABELS.has(k));
       return meaty ? meaty[0] : (cats[0] ? cats[0][0] : null);
     }
 
@@ -3725,7 +3853,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         list = list.filter((c) => creditCategories(c).includes(state.category));
       } else if (state.category !== ALL_CATEGORIES && settings.hideSelfCredits) {
         // Hide only credits that are nothing BUT noise.
-        list = list.filter((c) => !creditCategories(c).every((k) => NOISE_CATEGORIES.test(k)));
+        list = list.filter((c) => !creditCategories(c).every((k) => isNoiseCategory(c, k)));
       }
 
       if (state.filter) {
@@ -3836,13 +3964,13 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     const orig = root.querySelector('[data-imdbc-original]');
     if (orig) {
       orig.addEventListener('click', (e) => {
-        // Compare the IMDb id, not the URL: host, trailing slash and ?ref_ all vary.
-        const idOf = (u) => { const m = /\/(tt\d+|nm\d+)/.exec(u || ''); return m && m[1]; };
-        if (idOf(orig.getAttribute('href')) && idOf(orig.getAttribute('href')) === idOf(location.pathname)) {
-          e.preventDefault();
-          release();
-          showRestoreButton();
-        }
+        // Every caller passes the URL of the page we are already on, so there is
+        // nothing to compare: just reveal IMDb in place. Modified clicks are
+        // left alone so ctrl/middle-click still opens a tab.
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        release();
+        showRestoreButton();
       });
     }
   }
@@ -3898,7 +4026,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           ${SETTING_DEFS.theme.options.map((o) => html`<option value="${o}"${settings.theme === o ? raw(' selected') : ''}>${o}</option>`)}
         </select>
       </div>
-      ${['rottenTomatoes', 'watchOptions', 'trailers', 'photos', 'fullCast', 'fullCredits', 'hideSelfCredits', 'declineCookies'].map((k) => html`
+      ${['cleanHomepage', 'rottenTomatoes', 'watchOptions', 'trailers', 'photos', 'fullCast', 'fullCredits', 'hideSelfCredits', 'declineCookies'].map((k) => html`
         <div class="imdbc-set-row">
           <label for="imdbc-set-${k}">${SETTING_DEFS[k].label}</label>
           <input id="imdbc-set-${k}" type="checkbox" data-set="${k}"${settings[k] ? raw(' checked') : ''}>
@@ -3946,7 +4074,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   // ══════════════════════════════════════════════════════════════════════════
 
   function renderFailure(root, route, err) {
-    const href = route.kind === 'search' ? findUrl(route.query, route.section)
+    const href = route.kind === 'home' ? imdbUrl('/')
+      : route.kind === 'search' ? findUrl(route.query, route.section)
       : route.sub ? titleUrl(route.id) + route.sub + '/'
       : (route.kind === 'chart' || route.kind === 'list' || route.kind === 'titleSearch') ? listPageUrl(route)
       : route.kind === 'title' ? titleUrl(route.id) : nameUrl(route.id);
@@ -4003,7 +4132,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     try {
       const pp = await getPageProps(route);
       if (seq !== renderSeq) return;
-      if (route.kind === 'title') renderTitle(root, normaliseTitle(pp));
+      if (route.kind === 'home') renderHome(root, normaliseHome(pp));
+      else if (route.kind === 'title') renderTitle(root, normaliseTitle(pp));
       else if (route.kind === 'search') renderSearch(root, normaliseSearch(pp, route));
       else if (route.kind === 'titleRatings') renderTitleRatings(root, normaliseEntity(pp), normaliseRatings(pp));
       else if (route.kind === 'titleCredits') renderTitleCredits(root, normaliseEntity(pp), normaliseFullCredits(pp));

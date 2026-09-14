@@ -21,6 +21,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const SCRIPT = fs.readFileSync(path.join(ROOT, 'recut.user.js'), 'utf8');
 
 const TARGETS = [
+  { name: 'home', imdbPath: '/', height: 900, label: 'the homepage' },
   { name: 'title', imdbPath: '/title/tt0120737/', height: 1150, label: 'a film' },
   { name: 'person', imdbPath: '/name/nm0000276/', height: 1250, label: 'a person' },
   { name: 'media', imdbPath: '/name/nm0000276/', height: 720, label: 'the media row' },
