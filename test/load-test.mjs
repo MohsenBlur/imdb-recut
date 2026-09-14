@@ -175,6 +175,32 @@ console.log('\n[boxoffice] the takings chart has its own payload shape');
   check('the date window is spelled out', text.includes('11 Sep 2026'));
 }
 
+console.log('\n[density] no single entry may set the height of its whole section');
+{
+  // Measured on The Simpsons before this: one cast card 25,758px tall, the
+  // cast section 46,252 of the page's 51,670px, and 40 season tiles wrapped
+  // into four banks. Both are properties of the CSS, so both are asserted
+  // against the CSS rather than against a screenshot nobody re-reads.
+  const rule = (sel) => (new RegExp(sel.replace(/\./g, '\\.') + ' \\{[^}]*\\}').exec(SRC) || [''])[0];
+
+  const cast = rule('.imdbc-cast');
+  check('the cast grid does not stretch a row to its tallest card',
+    /align-items:\s*start/.test(cast), cast.replace(/\s+/g, ' ').slice(0, 90));
+
+  const ch = rule('.imdbc-person .ch');
+  check('a role line is clamped however long one character name is',
+    /line-clamp/.test(ch), ch.replace(/\s+/g, ' ').slice(0, 90));
+
+  const seasons = rule('.imdbc-seasons');
+  check('seasons scroll sideways rather than wrapping into banks',
+    /overflow-x:\s*auto/.test(seasons) && !/flex-wrap:\s*wrap/.test(seasons),
+    seasons.replace(/\s+/g, ' ').slice(0, 90));
+
+  check('no character list is joined without passing through the cap',
+    !/characters\.join\(/.test(SRC),
+    (SRC.match(/.{0,40}characters\.join\(.{0,20}/) || ['(none)'])[0]);
+}
+
 console.log('\n[overlays] the takeover must not hide its own overlays');
 {
   // The takeover hides every direct child of <body> that is not its root. The

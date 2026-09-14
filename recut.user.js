@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.11.0
+// @version      2.11.1
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -913,10 +913,32 @@
   // 7. GraphQL fetchers for the parts IMDb does not ship in the page
   // ══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * A long-running voice role carries a four-figure character list. Measured on
+   * The Simpsons: Dan Castellaneta has 1,299 characters - 21 KB of text in one
+   * line - which made his cast card 25,758 pixels tall, and because grid rows
+   * share a height it took the whole cast section with it: 46,000 of the page's
+   * 51,000 pixels. Name the ones worth reading and count the rest.
+   */
+  const ROLE_SHOWN = 4;
+  const ROLE_FETCH = 24;
+
+  function roleList(characters) {
+    const list = (characters || []).filter(Boolean);
+    if (list.length <= ROLE_SHOWN) return { text: list.join(' / '), more: '' };
+    return {
+      text: list.slice(0, ROLE_SHOWN).join(' / '),
+      // Only a list sitting exactly on the fetch cap is of unknown length. The
+      // page's own payload is not capped by us and carries the real total, so
+      // Dan Castellaneta reads "+1,295 more" rather than a shrug.
+      more: list.length === ROLE_FETCH ? '+ more' : `+${num(list.length - ROLE_SHOWN)} more`
+    };
+  }
+
   const CAST_FIELDS = `
     name { id nameText { text } primaryImage { url width height } }
     ... on Cast {
-      characters { name }
+      characters(limit: ${ROLE_FETCH}) { name }
       attributes { text }
       episodeCredits(first: 1) { total yearRange { year endYear } }
     }`;
@@ -1599,7 +1621,13 @@ html.imdbc-off #imdbc-root { display: none !important; }
 }
 
 /* ── cast grid ─────────────────────────────────────────────────────────── */
-.imdbc-cast { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(178px, 46%), 1fr)); gap: 18px; }
+/* align-items: start, or one oversized card stretches every sibling in its row
+   to match - which is how a single 1,299-character role became a 46,000-pixel
+   cast section rather than one tall card. */
+.imdbc-cast {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(178px, 46%), 1fr));
+  gap: 18px; align-items: start;
+}
 .imdbc-person { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .imdbc-person .ph {
   width: 100%; aspect-ratio: 2 / 3; border-radius: 9px; overflow: hidden;
@@ -1609,12 +1637,25 @@ html.imdbc-off #imdbc-root { display: none !important; }
 }
 .imdbc-person .ph img { width: 100%; height: 100%; object-fit: cover; }
 .imdbc-person .nm { font-weight: 600; font-size: var(--fs-item); line-height: 1.35; }
-.imdbc-person .ch { font-size: var(--fs-small); color: var(--imdbc-muted); line-height: 1.4; }
+/* Belt and braces: the cap above bounds how many roles are printed, this
+   bounds how tall any single one can make the card. */
+.imdbc-person .ch {
+  font-size: var(--fs-small); color: var(--imdbc-muted); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+:where(#imdbc-root) .mr { color: var(--imdbc-faint); white-space: nowrap; }
 .imdbc-person .ep { font-size: var(--fs-tiny); color: var(--imdbc-faint); }
 .imdbc-person .attr { font-size: var(--fs-tiny); color: var(--imdbc-faint); font-style: italic; }
 
 /* ── seasons ───────────────────────────────────────────────────────────── */
-.imdbc-seasons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 40 seasons wrapped into four banks of tiles and pushed the cast off the
+   screen. One row that scrolls sideways costs the same height at 5 seasons as
+   at 40 - the same treatment the homepage rows get. */
+.imdbc-seasons {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px;
+  scroll-snap-type: x proximity;
+}
+.imdbc-season { flex: 0 0 auto; scroll-snap-align: start; }
 .imdbc-season {
   border: 1px solid var(--imdbc-border); background: var(--imdbc-panel); border-radius: 9px;
   padding: 8px 14px; min-width: 88px; text-align: center;
@@ -2690,7 +2731,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
               ${c.people.map((p) => html`
                 <div class="imdbc-crewrow">
                   <a class="nm" href="${nameUrl(p.id)}">${p.name}</a>
-                  ${p.characters.length ? html`<span class="rl">${p.characters.join(' / ')}</span>` : ''}
+                  ${p.characters.length ? html`<span class="rl">${roleList(p.characters).text}${roleList(p.characters).more ? html` <span class="mr">${roleList(p.characters).more}</span>` : ''}</span>` : ''}
                   ${p.attributes.length && p.attributes[0] ? html`<span class="at">${p.attributes.join(', ')}</span>` : ''}
                 </div>`)}
             </div>
@@ -3626,7 +3667,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   }
 
   function personCard(p, { showEpisodes = true } = {}) {
-    const chars = p.characters && p.characters.length ? p.characters.join(' / ') : '';
+    const chars = roleList(p.characters);
     const attrs = p.attributes && p.attributes.length ? p.attributes.join(', ') : '';
     const eps = showEpisodes && p.episodeCount
       ? `${num(p.episodeCount)} episode${p.episodeCount === 1 ? '' : 's'}${p.episodeYears ? ' · ' + p.episodeYears : ''}`
@@ -3639,7 +3680,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         </a>
         <div>
           <div class="nm"><a href="${nameUrl(p.id)}">${p.name}</a></div>
-          ${chars ? html`<div class="ch">${chars}</div>` : ''}
+          ${chars.text ? html`<div class="ch">${chars.text}${chars.more ? html` <span class="mr">${chars.more}</span>` : ''}</div>` : ''}
           ${attrs ? html`<div class="attr">${attrs}</div>` : ''}
           ${eps ? html`<div class="ep">${eps}</div>` : ''}
         </div>
@@ -3984,7 +4025,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           if (!root.isConnected || !full.length) return;
           const seen = new Set();
           state.all = full.concat(state.all).filter((p) => {
-            const key = p.id + '|' + p.characters.join('/');
+            // Bounded, like everything else that touches this list: the whole
+            // join made a 21 KB key per person, rebuilt on every keystroke.
+            const key = p.id + '|' + p.characters.length + '|' + p.characters.slice(0, ROLE_SHOWN).join('/');
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -4213,7 +4256,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   function knownForCard(c) {
     const poster = thumb(c.poster, 240, 360, c.posterSize);
-    const role = c.characters && c.characters.length ? c.characters.join(' / ') : (c.roleText || c.category || '');
+    const named = roleList(c.characters);
+    const role = named.text ? named.text + (named.more ? ' ' + named.more : '') : (c.roleText || c.category || '');
     return html`
       <div class="imdbc-card">
         <a class="po" href="${titleUrl(c.id)}" tabindex="-1" aria-hidden="true">
@@ -4268,7 +4312,10 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     const type = typeLabel(c);
 
     let role = '';
-    if (c.characters && c.characters.length) role = interpolate(html`as <b>${c.characters.join(' / ')}</b>`);
+    const named = roleList(c.characters);
+    if (named.text) {
+      role = interpolate(html`as <b>${named.text}</b>${named.more ? html` <span class="imdbc-note">${named.more}</span>` : ''}`);
+    }
     else if (c.roleText) role = interpolate(html`<b>${c.roleText}</b>`);
     else if (c.category) role = interpolate(html`${c.category}`);
     if (c.attributes && c.attributes.length) role += interpolate(html` <span class="imdbc-note">(${c.attributes.join(', ')})</span>`);

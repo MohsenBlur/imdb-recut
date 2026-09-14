@@ -25,14 +25,19 @@ function sliceDecl(name) {
 }
 
 const DECLS = [
+  // Order matters: these are concatenated as written, so anything a template
+  // literal interpolates has to be declared before it - the same temporal
+  // dead zone the script itself has to respect.
+  'ROLE_SHOWN', 'ROLE_FETCH', 'roleList',
   'GQL_ENDPOINT', 'GQL_HEADERS', 'CAST_FIELDS', 'PERSON_CREDIT_FIELDS', 'REVIEW_SORTS',
   'edges', 'gqlStr', 'num', 'compactNum', 'runtimeText', 'yearText', 'imgSize',
-  'GQL_URL_MAX', 'gql', 'normaliseTitleCard', 'normaliseCastFromGraphql', 'normalisePersonCredit',
+  'GQL_URL_MAX',
+  'gql', 'normaliseTitleCard', 'normaliseCastFromGraphql', 'normalisePersonCredit',
   'normaliseReview', 'creditCategories', 'dedupeCredits',
   'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits',
 ];
 
-const EXPORTS = ['creditCategories', 'gql', 'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits', 'REVIEW_SORTS', 'GQL_HEADERS', 'GQL_URL_MAX'];
+const EXPORTS = ['creditCategories', 'gql', 'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits', 'REVIEW_SORTS', 'GQL_HEADERS', 'GQL_URL_MAX', 'roleList', 'ROLE_SHOWN', 'ROLE_FETCH'];
 const body = DECLS.map(sliceDecl).join('\n\n');
 
 let calls = 0;
@@ -164,6 +169,37 @@ console.log('\n[fetchSeasonStats]');
   await M.gql('{ title(id: "tt0903747") { titleText { text } } }');
   check('a short query still goes out as a GET', posts === shortPosts);
   check(`the switch sits below IMDb's ceiling`, M.GQL_URL_MAX < 7942, `GQL_URL_MAX=${M.GQL_URL_MAX}`);
+}
+
+// ── a role list that runs to four figures ───────────────────────────
+console.log('\n[characters] tt0096697 (The Simpsons) — one voice, 1,299 parts');
+{
+  // Unbounded, one cast page of this show is 207 KB because a handful of voice
+  // actors carry four-figure character lists - Dan Castellaneta has 1,299 and
+  // one other has 1,620. Rendered whole, his card came out 25,758 pixels tall
+  // and, since grid rows share a height, took the cast section to 46,000.
+  const cast = await M.fetchFullCast('tt0096697', 60);
+  const worst = cast.reduce((a, c) => Math.max(a, c.characters.length), 0);
+  check('no character list comes back longer than the cap',
+    worst <= M.ROLE_FETCH, `longest is ${worst}, cap is ${M.ROLE_FETCH}`);
+  check('the cap is not so tight it flattens ordinary roles',
+    cast.some((c) => c.characters.length > 1));
+
+  const homer = cast.find((c) => c.name === 'Dan Castellaneta');
+  check('the famous case is present and capped', !!homer && homer.characters.length === M.ROLE_FETCH,
+    homer ? `${homer.characters.length} characters` : 'not in the first 60');
+
+  const shown = M.roleList(homer.characters);
+  check('only a readable handful is printed',
+    shown.text.split(' / ').length === M.ROLE_SHOWN, shown.text);
+  check('a list sitting on the cap does not claim a total it does not have',
+    shown.more === '+ more', shown.more);
+  check('a list we hold in full reports the real remainder',
+    M.roleList(Array.from({ length: 1299 }, (_, i) => 'Role ' + i)).more === '+1,295 more',
+    M.roleList(Array.from({ length: 1299 }, (_, i) => 'Role ' + i)).more);
+  check('a short list is printed whole with nothing appended',
+    M.roleList(['Homer', 'Krusty']).text === 'Homer / Krusty' && M.roleList(['Homer', 'Krusty']).more === '');
+  check('no characters yields no text', M.roleList([]).text === '' && M.roleList(undefined).text === '');
 }
 
 // ── full filmography ──────────────────────────────────────────────────────

@@ -435,3 +435,50 @@ The selected season tab inverts to the page's text colour, so a band tuned for
 the page washes out on it — bright green on near-white in the dark theme, and
 the reverse in the light one. Each theme now also carries the other theme's band
 values as `--rb-*-alt`, and one rule swaps them in on any inverted surface.
+
+## 11. One entry that sets the height of a whole section (observed 2026-09-15)
+
+Seen on the real Simpsons page, in the browser, with the script installed:
+
+| | before | after |
+| --- | --- | --- |
+| document height | 51,670px | 7,991px |
+| cast section | 46,252px | 2,539px |
+| tallest cast card | 25,758px | 407px |
+
+**A long-running voice role carries a four-figure character list.** Dan
+Castellaneta has **1,299** characters on The Simpsons - 21,345 characters of
+text - and one other cast member has **1,620**. Joined with " / " into one line
+it made his card 25,758px tall; because CSS grid rows share a height, the other
+five cards in his row stretched to match, and the cast section became 90% of the
+page.
+
+Three separate things had to be true for that, and all three are now fixed:
+
+1. **The render joined the whole list.** Four places did, plus a dedupe key that
+   built a 21 KB string per person on every keystroke of the cast filter. All go
+   through `roleList()` now: four names, then `+1,295 more`.
+2. **The fetch asked for every character.** `characters` takes `limit` (not
+   `first` - the error message says so). Measured on one 250-cast page of this
+   show: unbounded **207 KB**, `limit: 6` **82 KB**, `limit: 12` **86 KB**,
+   `limit: 24` **91 KB**. 24 costs 11% more than 6 and keeps an exact remainder
+   for all but 18 of the 250, so 24 it is. A list sitting exactly on the cap
+   says `+ more` rather than claiming a total it does not have.
+3. **The grid stretched the row.** `align-items: start` on `.imdbc-cast`, so an
+   oversized card is one tall card and not six.
+
+`.imdbc-person .ch` is also line-clamped, because none of the above bounds how
+tall a single very long character *name* can make a card.
+
+Separately, **40 season tiles wrapped into four banks** and pushed the cast off
+the screen. The seasons row now scrolls sideways like the homepage rows: 117px
+tall whether the show has 5 seasons or 40.
+
+`test/load-test.mjs` asserts all four properties against the CSS and the source
+rather than against a screenshot nobody re-reads, and `test/gql-suite.mjs`
+fetches this show's cast and asserts nothing comes back over the cap.
+
+One more instance of the temporal dead zone, in both the script and the test:
+`CAST_FIELDS` is a template literal evaluated at load, so `ROLE_FETCH` has to be
+declared above it. `node --check` passes either way - the load test is what
+catches it, and the live suite caught its own copy of the same ordering bug.
