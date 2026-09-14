@@ -290,3 +290,87 @@ not render, on an entry with 30 days left to live. TTLs expire stale *data*;
 they do nothing about stale *shape*. The disk cache prefix now carries a schema
 version (`cache:v2:`) that is bumped whenever a cached value's shape changes, and
 readers check the shape anyway.
+
+## 8. The homepage's own data (observed 2026-09-15, fourth round)
+
+**Introspection is refused.** `{ __type(name: "Query") { fields { name } } }`
+answers `Unauthorized introspection request. Token is invalid or missing` with
+or without a client header. Field names have to be guessed — but a wrong guess
+is informative: the error carries suggestions
+(`recommendedTitles` → *Did you mean "topMeterTitles"?*), and a right guess with
+missing arguments names the argument and its type. That is how the two fields
+below were found without a schema.
+
+**`topPicksTitles(first: Int!)` and `fanPicksTitles(first: Int!)` exist, and
+both require an `x-amzn-sessionid` header.** Without it:
+
+```
+BAD_USER_INPUT exception code while fetching data (/fanPicksTitles)
+  : The x-amzn-sessionid header is required
+```
+
+IMDb writes that value to a plain, script-readable `session-id` cookie on every
+visit (measured in a signed-out browser: `session-id=146-…`, alongside
+`session-id-time`, `ubid-main`, `aws-waf-token`). Passing any well-formed
+session id is accepted; passing one the service has never seen returns the
+**unpersonalised** list, which is exactly what a signed-out visitor should get.
+Measured with a synthetic id:
+
+| field | signed-out result |
+| --- | --- |
+| `topPicksTitles(first: 5)` | `edges: []` — personalised, needs a real account |
+| `fanPicksTitles(first: 5)` | 5 titles: *The Odyssey*, *Spider-Man: Brand New Day*, … |
+
+So the row is labelled for what it actually is: **Top picks** when the
+personalised list has titles, **Fan favourites** otherwise. It is fetched as its
+own query rather than folded into the popular-rows query, because `gql()` throws
+on any GraphQL error and a per-field refusal would otherwise take the whole
+homepage down with it.
+
+`TOP_PICKS` is **not** a `ChartTitleType`. The valid values are
+`MOST_POPULAR_MOVIES`, `MOST_POPULAR_TV_SHOWS`, `TOP_RATED_MOVIES`,
+`TOP_RATED_TV_SHOWS`, `TOP_RATED_ENGLISH_MOVIES`.
+
+**`recentVideos(limit: N)` is the homepage hero panel's data**, and needs no
+session:
+
+```
+{ recentVideos(limit: 3) { videos {
+    id name { value } runtime { value }
+    thumbnail { url width height }
+    primaryTitle { id titleText { text } } } } }
+```
+
+Returns e.g. `vi1318701593`, name `Trailer`, runtime 112 seconds, a 1280×720
+thumbnail and a `primaryTitle`. Playback URLs come from the existing
+`fetchVideo(id)`, so nothing loads until the card is clicked. Some thumbnails
+have letterbox bars baked into the asset itself — measured, not a CSS fault.
+
+## 9. `/chart/boxoffice/` is shaped differently from every other chart
+
+Every other chart is `pageProps.pageData.chartTitles.edges[].node` — a title
+with a `currentRank`. The box office chart is
+`pageProps.pageData.topGrossingReleases`, keyed on **releases and takings**:
+
+```
+{ timeWindowStartDate: '2026-09-11', timeWindowEndDate: '2026-09-13',
+  edges: [ { node: { gross: { total: { amount, currency } },
+                     release: { weeksRunning, titles: [ <title> ] } } } ] }
+```
+
+The title inside carries `id`, `titleText`, `primaryImage`, `ratingsSummary`,
+`plot`, `titleType` and `lifetimeGross` — but **no** `releaseYear`, `runtime`,
+`certificate` or `titleGenres`, so those rows are legitimately sparser.
+
+This was linked from the homepage from the day the homepage existed, and every
+visit to it landed on the *"Recut could not read this page"* card: the route was
+recognised (`boxoffice` is in `CHARTS`), so the takeover happened, and then the
+payload guard — which only knew `chartTitles` — refused to draw. Recognising a
+route and being able to render it are two different things, and only the first
+one was ever tested.
+
+`test/load-test.mjs` now walks every path the homepage links to and asserts the
+takeover, and renders a trimmed real box-office payload end to end. Making that
+second test possible exposed a third thing: the sandbox had no `window.scrollTo`,
+which `render()` calls on every route — so *every* render in that suite had been
+failing silently, and the suite only ever asserted "did not throw".

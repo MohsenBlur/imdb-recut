@@ -40,8 +40,8 @@ including the homepage takeover, so it can be cut back further than the defaults
 | `/name/nm…` | Known-for, then the *complete* filmography with the character played on every row, category tabs, filter and sort |
 | `…/ratings` `…/fullcredits` `…/episodes` `…/reviews` | Rating histogram and per-country breakdown · every cast and crew member · season tabs with stills · the full review list |
 | `/find` `/search/title` | Results as rows, plus type-ahead in the header |
-| `/chart/…` `/list/ls…` | Top 250, other charts, user lists |
-| `/` | Search, quick links, and what's trending and popular — without the news, promos and ads |
+| `/chart/…` `/list/ls…` | Top 250, the popularity charts, the weekend box office with each film's takings, user lists |
+| `/` | Search, quick links, IMDb's own picks, trending and popular as single-line rows, and the hero trailer shrunk into the corner — without the news, promos and ads |
 
 Every rating is colour-banded on one scale — **≥8.0 green · 7.0–7.9 lime ·
 6.0–6.9 amber · below 6.0 red** — so a filmography can be skimmed without
@@ -58,6 +58,7 @@ from 14 votes doesn't outshout a classic. The cookie banner is hidden and
 ![Ratings breakdown](docs/screenshots/ratings.png)
 ![Episode list](docs/screenshots/episodes.png)
 ![Top 250](docs/screenshots/chart.png)
+![Box office](docs/screenshots/boxoffice.png)
 
 </details>
 

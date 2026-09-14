@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.9.0
+// @version      2.10.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -466,10 +466,23 @@
     'x-imdb-client-name': 'imdb-web-next'
   };
 
-  async function gql(query) {
+  /**
+   * IMDb's picks rows are keyed to the browser's Amazon session, which the
+   * site writes as a plain readable cookie. Without the header the API refuses
+   * those fields outright; with a session it has never seen it answers with the
+   * unpersonalised list, which is what a signed-out visitor should get.
+   */
+  function sessionId() {
+    const m = /(?:^|;\s*)session-id=([^;]+)/.exec(document.cookie || '');
+    return m ? m[1] : '';
+  }
+
+  async function gql(query, { session = false } = {}) {
     const compact = query.replace(/\s+/g, ' ').trim();
     const url = GQL_ENDPOINT + '?query=' + encodeURIComponent(compact);
-    const text = await netGet(url, { headers: GQL_HEADERS });
+    const sid = session ? sessionId() : '';
+    const headers = sid ? Object.assign({ 'x-amzn-sessionid': sid }, GQL_HEADERS) : GQL_HEADERS;
+    const text = await netGet(url, { headers });
     let json;
     try { json = JSON.parse(text); } catch (_) { throw new Error('IMDb GraphQL returned non-JSON'); }
     if (json.errors && json.errors.length) {
@@ -502,7 +515,7 @@
       return !!(e && e.id === route.id);
     }
     if (route.kind === 'home') return !!pp.pageQueryData;
-    if (route.kind === 'chart') return !!(pp.pageData && pp.pageData.chartTitles);
+    if (route.kind === 'chart') return !!(pp.pageData && (pp.pageData.chartTitles || pp.pageData.topGrossingReleases));
     if (route.kind === 'list') return !!(pp.mainColumnData && pp.mainColumnData.list);
     if (route.kind === 'titleSearch') return !!(pp.searchResults && pp.searchResults.titleResults);
     const id = route.kind === 'title'
@@ -1331,6 +1344,8 @@
   --imdbc-popcorn: #c77b1a;
   --imdbc-meta: #2f7d4f;
   --imdbc-shadow: 0 1px 2px rgba(16,20,28,.06);
+  --imdbc-scroll: #c5cad3;
+  --imdbc-scroll-hover: #9aa2b1;
 
   /* Fluid type: grows with the viewport instead of sitting at a fixed small
      size on a large screen, and stops before lines get unwieldy. */
@@ -1359,6 +1374,26 @@ html.imdbc-on.imdbc-dark {
   --imdbc-popcorn: #ffbf47;
   --imdbc-meta: #6fd39a;
   --imdbc-shadow: none;
+  --imdbc-scroll: #333b4d;
+  --imdbc-scroll-hover: #47526b;
+}
+
+/* The browser's default scrollbar is the one piece of chrome the layout does
+   not own, and a bright system bar against a dark page reads as a seam. Given
+   the palette instead: a transparent track and a thumb inset by its own
+   transparent border, so it reads as part of the page. Declaring color-scheme
+   puts the native form controls on the same footing. */
+html.imdbc-on { color-scheme: light; scrollbar-width: thin; scrollbar-color: var(--imdbc-scroll) transparent; }
+html.imdbc-on.imdbc-dark { color-scheme: dark; }
+html.imdbc-on ::-webkit-scrollbar { width: 12px; height: 12px; }
+html.imdbc-on ::-webkit-scrollbar-track,
+html.imdbc-on ::-webkit-scrollbar-corner { background: transparent; }
+html.imdbc-on ::-webkit-scrollbar-thumb {
+  background: var(--imdbc-scroll); background-clip: padding-box;
+  border: 3px solid transparent; border-radius: 999px;
+}
+html.imdbc-on ::-webkit-scrollbar-thumb:hover {
+  background: var(--imdbc-scroll-hover); background-clip: padding-box;
 }
 
 html.imdbc-on { background: var(--imdbc-bg) !important; }
@@ -1653,7 +1688,13 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
 
 /* ── homepage ──────────────────────────────────────── */
-.imdbc-home { padding: 40px 0 4px; max-width: 760px; }
+/* Search and links on the left, IMDb's hero trailer shrunk into the empty
+   right-hand side rather than given a screen of its own. */
+.imdbc-home {
+  padding: 30px 0 6px; display: grid; gap: 14px 32px; align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 330px);
+}
+.imdbc-home-main { min-width: 0; max-width: 760px; }
 .imdbc-home-search { margin: 0 0 14px; display: flex; }
 .imdbc-home-search input {
   width: 100%; padding: 14px 20px; border-radius: 999px; font: inherit;
@@ -1664,12 +1705,54 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
 /* Rows scroll sideways rather than wrapping, so each section stays one card tall. */
 .imdbc-scroller {
-  display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px;
-  scroll-snap-type: x proximity; scrollbar-width: thin;
+  display: flex; gap: 16px; overflow-x: auto; padding-bottom: 10px;
+  scroll-snap-type: x proximity;
 }
 .imdbc-scroller > * { flex: 0 0 158px; scroll-snap-align: start; }
 @media (max-width: 760px) { .imdbc-scroller > * { flex-basis: 132px; } }
 .imdbc-home .imdbc-result .po { display: none; }
+
+.imdbc-htrailer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.imdbc-htrailer:empty { display: none; }
+.imdbc-htrailer-shot {
+  position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; padding: 0;
+  border: 1px solid var(--imdbc-border); border-radius: 11px; overflow: hidden;
+  background: var(--imdbc-panel-2); cursor: pointer;
+}
+.imdbc-htrailer-shot.is-loading { display: grid; place-items: center; cursor: default; }
+.imdbc-htrailer-shot img { width: 100%; height: 100%; object-fit: cover; }
+.imdbc-htrailer-shot .play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 48px; height: 48px; border-radius: 50%; background: rgba(0,0,0,.55);
+  border: 2px solid rgba(255,255,255,.92); transition: background .12s ease;
+}
+.imdbc-htrailer-shot .play::after {
+  content: ''; position: absolute; left: 55%; top: 50%; transform: translate(-50%, -50%);
+  border: 9px solid transparent; border-left: 15px solid #fff; border-right: 0;
+}
+.imdbc-htrailer-shot:hover .play { background: rgba(0,0,0,.82); }
+.imdbc-htrailer-video { width: 100%; aspect-ratio: 16 / 9; border-radius: 11px; }
+.imdbc-htrailer-meta { display: flex; align-items: center; gap: 8px; }
+.imdbc-htrailer-meta .tx { flex: 1 1 auto; min-width: 0; display: grid; }
+.imdbc-htrailer-meta .ti {
+  font-size: var(--fs-small); font-weight: 650;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.imdbc-htrailer-meta .sub {
+  font-size: var(--fs-tiny); color: var(--imdbc-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.imdbc-htrailer-meta .nav {
+  flex: 0 0 auto; width: 27px; height: 27px; padding: 0; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--imdbc-border); background: var(--imdbc-panel);
+  color: var(--imdbc-muted); font-size: 16px; line-height: 1;
+}
+.imdbc-htrailer-meta .nav:hover { background: var(--imdbc-panel-2); color: var(--imdbc-text); }
+
+@media (max-width: 900px) {
+  .imdbc-home { grid-template-columns: 1fr; gap: 18px; align-items: start; }
+  .imdbc-htrailer { max-width: 420px; }
+}
 
 /* ── where to watch ────────────────────────────────────────────────────── */
 .imdbc-watchrow:empty { display: none; }
@@ -1874,6 +1957,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-result .ti { font-weight: 650; font-size: var(--fs-item); line-height: 1.35; }
 .imdbc-result .mt { font-size: var(--fs-small); color: var(--imdbc-faint); display: flex; gap: 14px; flex-wrap: wrap; }
 .imdbc-result .mt .rt { font-weight: 600; }
+.imdbc-result .mt .note { color: var(--imdbc-muted); }
+.imdbc-result .mt .note b { font-weight: 650; color: var(--imdbc-text); }
 .imdbc-result .pl {
   font-size: var(--fs-small); color: var(--imdbc-muted); line-height: 1.55; max-width: 78ch;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -2603,6 +2688,25 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     'top-english-movies': 'Top English-language movies'
   };
 
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  /** "2026-09-11" -> "11 Sep 2026". Anything else passes through unchanged. */
+  function dayText(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if (!m) return String(iso || '');
+    return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] || m[2]} ${m[1]}`;
+  }
+
+  /** A BoxOfficeGross as a short figure: $30M, $1.2B, €940K. */
+  function moneyText(gross) {
+    const t = gross && gross.total;
+    if (!t || typeof t.amount !== 'number') return '';
+    const m = t.amount;
+    const unit = m >= 1e9 ? [1e9, 'B'] : m >= 1e6 ? [1e6, 'M'] : m >= 1e3 ? [1e3, 'K'] : [1, ''];
+    const sym = t.currency === 'USD' ? '$' : t.currency === 'EUR' ? '€' : (t.currency ? t.currency + ' ' : '');
+    return sym + (m / unit[0]).toFixed(m / unit[0] >= 100 ? 0 : 1).replace(/\.0$/, '') + unit[1];
+  }
+
   /** The flat listItem shape shared by /find and /search/title. */
   function normaliseFlatTitle(li) {
     if (!li) return null;
@@ -2628,6 +2732,33 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   function normaliseTitleListPage(pp, route) {
     if (route.kind === 'chart') {
+      // The box office chart is shaped around releases and takings rather than
+      // titles and ranks, and lives under its own key.
+      const grossing = pp.pageData && pp.pageData.topGrossingReleases;
+      if (grossing) {
+        const window = [grossing.timeWindowStartDate, grossing.timeWindowEndDate].filter(Boolean);
+        return {
+          heading: CHARTS[route.id] || 'Chart',
+          subtitle: window.length === 2 ? `Weekend of ${dayText(window[0])} – ${dayText(window[1])}` : '',
+          items: (grossing.edges || []).map((e, i) => {
+            const node = (e && e.node) || {};
+            const t = normaliseTitleCard((node.release && node.release.titles && node.release.titles[0]) || null);
+            if (!t) return null;
+            t.rank = i + 1;
+            const weekend = moneyText(node.gross);
+            const lifetime = moneyText((node.release && node.release.titles[0] || {}).lifetimeGross);
+            const weeks = node.release && node.release.weeksRunning;
+            t.note = [
+              weekend ? weekend + ' this weekend' : '',
+              lifetime && lifetime !== weekend ? lifetime + ' total' : '',
+              weeks ? (weeks === 1 ? 'first week' : `week ${weeks}`) : ''
+            ].filter(Boolean).join(' · ');
+            return t;
+          }).filter(Boolean),
+          ranked: true
+        };
+      }
+
       const edges = (pp.pageData && pp.pageData.chartTitles && pp.pageData.chartTitles.edges) || [];
       return {
         heading: CHARTS[route.id] || 'Chart',
@@ -2693,6 +2824,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
                       ${typeof t.rating === 'number'
                         ? html`<span class="rt ${ratingClasses(t.rating, 10, t.votes)}">★ ${t.rating.toFixed(1)}<small> ${compactNum(t.votes)}</small></span>` : ''}
                       ${t.genres && t.genres.length ? html`<span>${t.genres.slice(0, 3).join(', ')}</span>` : ''}
+                      ${t.note ? html`<span class="note">${t.note}</span>` : ''}
                     </span>
                     ${t.plot ? html`<span class="pl">${t.plot}</span>` : ''}
                   </span>
@@ -3072,14 +3204,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   function normaliseHome(pp) {
     const data = (pp.pageQueryData && pp.pageQueryData.data) || {};
     const chart = data.boxOfficeWeekendChart || {};
-    const money = (g) => {
-      const t = g && g.total;
-      if (!t || typeof t.amount !== 'number') return '';
-      const m = t.amount;
-      const unit = m >= 1e9 ? [1e9, 'B'] : m >= 1e6 ? [1e6, 'M'] : m >= 1e3 ? [1e3, 'K'] : [1, ''];
-      const sym = t.currency === 'USD' ? '$' : t.currency === 'EUR' ? '€' : (t.currency ? t.currency + ' ' : '');
-      return sym + (m / unit[0]).toFixed(m / unit[0] >= 100 ? 0 : 1).replace(/\.0$/, '') + unit[1];
-    };
+    const money = moneyText;
     return {
       weekend: (chart.entries || []).map((e) => ({
         id: e.title && e.title.id,
@@ -3106,6 +3231,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     certificate { rating }
     titleGenres { genres { genre { text } } }`;
 
+  const fromEdges = (c) => edges(c).map(normaliseTitleCard).filter(Boolean);
+
   function fetchHomeRows() {
     return memoizeDisk('home:rows', 60 * 60 * 1000, async () => {
       const data = await gql(`{
@@ -3113,7 +3240,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         popMovies: chartTitles(first: 14, chart: { chartType: MOST_POPULAR_MOVIES }) { edges { node { ${HOME_CARD_FIELDS} } } }
         popTv: chartTitles(first: 14, chart: { chartType: MOST_POPULAR_TV_SHOWS }) { edges { node { ${HOME_CARD_FIELDS} } } }
       }`);
-      const fromEdges = (c) => edges(c).map(normaliseTitleCard).filter(Boolean);
       return {
         trending: ((data && data.trending && data.trending.titles) || []).map(normaliseTitleCard).filter(Boolean),
         popMovies: fromEdges(data && data.popMovies),
@@ -3122,16 +3248,66 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     });
   }
 
+  /**
+   * IMDb's own "Top picks" is personalised and comes back empty unless you are
+   * signed in, so the same request also asks for the fan list and whichever one
+   * has titles is the one shown — labelled for what it actually is. Kept out of
+   * the rows query so that a refusal here costs one row, not the whole page.
+   */
+  function fetchHomePicks() {
+    return memoizeDisk('home:picks', 60 * 60 * 1000, async () => {
+      const data = await gql(`{
+        topPicks: topPicksTitles(first: 14) { edges { node { ${HOME_CARD_FIELDS} } } }
+        fanPicks: fanPicksTitles(first: 14) { edges { node { ${HOME_CARD_FIELDS} } } }
+      }`, { session: true });
+      const top = fromEdges(data && data.topPicks);
+      return top.length
+        ? { label: 'Top picks', items: top }
+        : { label: 'Fan favourites', items: fromEdges(data && data.fanPicks) };
+    });
+  }
+
+  /** The trailers behind IMDb's homepage hero panel. */
+  function fetchHomeTrailers() {
+    return memoizeDisk('home:trailers', 60 * 60 * 1000, async () => {
+      const data = await gql(`{ recentVideos(limit: 8) { videos {
+        id name { value } runtime { value }
+        thumbnail { url width height }
+        primaryTitle { id titleText { text } }
+      } } }`);
+      return (((data && data.recentVideos && data.recentVideos.videos) || [])).map((v) => ({
+        id: v.id,
+        name: (v.name && v.name.value) || 'Trailer',
+        seconds: (v.runtime && v.runtime.value) || 0,
+        thumb: (v.thumbnail && v.thumbnail.url) || '',
+        thumbSize: imgSize(v.thumbnail),
+        titleId: (v.primaryTitle && v.primaryTitle.id) || '',
+        title: (v.primaryTitle && v.primaryTitle.titleText && v.primaryTitle.titleText.text) || ''
+      })).filter((v) => v.id && v.thumb);
+    });
+  }
+
   const HOME_ROWS = [
+    { key: 'picks', label: 'Top picks' },
     { key: 'trending', label: 'Trending' },
     { key: 'popMovies', label: 'Popular movies', more: '/chart/moviemeter/' },
     { key: 'popTv', label: 'Popular TV', more: '/chart/tvmeter/' }
   ];
 
   async function wireHome(root) {
+    wireHomeHero(root);
+
     const host = root.querySelector('[data-imdbc-home-rows]');
     if (!host) return;
     const token = renderSeq;
+
+    // The picks row is allowed to fail on its own; only the main query going
+    // down means there is nothing to show.
+    const picksPromise = fetchHomePicks().catch((e) => {
+      warn('homepage picks failed', e);
+      return { label: 'Top picks', items: [] };
+    });
+
     let rows;
     try {
       rows = await fetchHomeRows();
@@ -3141,17 +3317,101 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       host.innerHTML = interpolate(html`<p class="imdbc-note">Couldn't load what's popular right now.</p>`);
       return;
     }
+    const picks = await picksPromise;
     if (token !== renderSeq || !root.isConnected) return;
 
+    const data = Object.assign({ picks: picks.items }, rows);
     host.innerHTML = HOME_ROWS.map((r) => {
-      const items = (rows && rows[r.key]) || [];
+      const items = data[r.key] || [];
       if (!items.length) return '';
+      const label = r.key === 'picks' ? picks.label : r.label;
       return interpolate(html`
         <section class="imdbc-sec">
-          ${sectionHead(r.label, '', r.more ? html`<a class="imdbc-btn" href="${imdbUrl(r.more)}">See all</a>` : '')}
+          ${sectionHead(label, '', r.more ? html`<a class="imdbc-btn" href="${imdbUrl(r.more)}">See all</a>` : '')}
           <div class="imdbc-cards imdbc-scroller">${items.map(titleCard)}</div>
         </section>`);
     }).join('');
+  }
+
+  /**
+   * IMDb leads its homepage with a screen-filling trailer panel. The same
+   * trailers are here, but as one small card in the header's empty right-hand
+   * column: it fills space that was blank instead of claiming a screenful, and
+   * nothing loads until you press play.
+   */
+  function heroTrailerCard(v, index, total) {
+    if (!v) return '';
+    const poster = thumb(v.thumb, 480, 270, v.thumbSize);
+    return interpolate(html`
+      <button type="button" class="imdbc-htrailer-shot" data-imdbc-htrailer-play
+              aria-label="Play ${v.title ? v.title + ' — ' + v.name : v.name}">
+        ${poster ? html`<img src="${poster}" alt="" loading="lazy" decoding="async">` : ''}
+        <span class="play" aria-hidden="true"></span>
+      </button>
+      ${heroMeta(v, index, total)}`);
+  }
+
+  function heroMeta(v, index, total) {
+    const nav = (step, label, glyph) => html`
+      <button type="button" class="nav" data-imdbc-htrailer-step="${String(step)}" aria-label="${label}">${glyph}</button>`;
+    return html`
+      <div class="imdbc-htrailer-meta">
+        ${total > 1 ? nav(-1, 'Previous trailer', '\u2039') : ''}
+        <span class="tx">
+          <a class="ti" href="${v.titleId ? titleUrl(v.titleId) : '#'}">${v.title || v.name}</a>
+          <span class="sub">${v.name}${v.seconds ? html` \u00b7 ${videoTime(v.seconds)}` : ''}${total > 1 ? html` \u00b7 ${index + 1}/${total}` : ''}</span>
+        </span>
+        ${total > 1 ? nav(1, 'Next trailer', '\u203a') : ''}
+      </div>`;
+  }
+
+  async function wireHomeHero(root) {
+    const host = root.querySelector('[data-imdbc-htrailer]');
+    if (!host) return;
+    const token = renderSeq;
+    let videos;
+    try {
+      videos = await fetchHomeTrailers();
+    } catch (e) {
+      warn('homepage trailers failed', e);
+      return;
+    }
+    if (!videos.length || token !== renderSeq || !root.isConnected) return;
+
+    let i = 0;
+    const paint = () => { host.innerHTML = heroTrailerCard(videos[i], i, videos.length); };
+    paint();
+
+    host.addEventListener('click', async (e) => {
+      const step = e.target.closest('[data-imdbc-htrailer-step]');
+      if (step) {
+        i = (i + Number(step.getAttribute('data-imdbc-htrailer-step')) + videos.length) % videos.length;
+        paint();
+        return;
+      }
+      if (!e.target.closest('[data-imdbc-htrailer-play]')) return;
+
+      const v = videos[i];
+      const playing = i;
+      host.innerHTML = interpolate(html`
+        <div class="imdbc-htrailer-shot is-loading"><span class="imdbc-loading">Loading trailer</span></div>
+        ${heroMeta(v, i, videos.length)}`);
+      let full;
+      try {
+        full = await fetchVideo(v.id);
+      } catch (err) {
+        warn('hero trailer failed', err);
+      }
+      // Bail if the render moved on, or the arrows moved to another trailer
+      // while this one was loading.
+      if (token !== renderSeq || !root.isConnected || playing !== i) return;
+      const src = full && bestSource(full);
+      if (!src) { paint(); return; }
+      host.innerHTML = interpolate(html`
+        <video class="imdbc-video imdbc-htrailer-video" controls autoplay playsinline preload="metadata"
+               poster="${thumb(v.thumb, 480, 270, v.thumbSize)}" src="${safeUrl(src)}"></video>
+        ${heroMeta(v, i, videos.length)}`);
+    });
   }
 
   function renderHome(root, home) {
@@ -3159,13 +3419,16 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       ${topBar(imdbUrl('/'))}
       <div class="imdbc-wrap">
         <div class="imdbc-home">
-          <form class="imdbc-home-search" action="${imdbUrl('/find/')}" method="get" role="search" autocomplete="off">
-            <input type="search" name="q" placeholder="Search films, shows and people"
-                   aria-label="Search IMDb" autocomplete="off" spellcheck="false" data-imdbc-home-q>
-          </form>
-          <div class="imdbc-tools imdbc-home-links">
-            ${HOME_LINKS.map((l) => html`<a class="imdbc-btn" href="${imdbUrl(l.path)}">${l.label}</a>`)}
+          <div class="imdbc-home-main">
+            <form class="imdbc-home-search" action="${imdbUrl('/find/')}" method="get" role="search" autocomplete="off">
+              <input type="search" name="q" placeholder="Search films, shows and people"
+                     aria-label="Search IMDb" autocomplete="off" spellcheck="false" data-imdbc-home-q>
+            </form>
+            <div class="imdbc-tools imdbc-home-links">
+              ${HOME_LINKS.map((l) => html`<a class="imdbc-btn" href="${imdbUrl(l.path)}">${l.label}</a>`)}
+            </div>
           </div>
+          ${settings.trailers ? html`<div class="imdbc-htrailer" data-imdbc-htrailer></div>` : ''}
         </div>
 
         <div data-imdbc-home-rows>

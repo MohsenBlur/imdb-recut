@@ -7,7 +7,8 @@
 // the userscript attached. The script then renders exactly what it renders in
 // the browser, and headless Chrome photographs it.
 //
-//   node tools/shots.mjs
+//   node tools/shots.mjs            every screenshot
+//   ONLY=home,chart node tools/shots.mjs   just those two
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -20,15 +21,20 @@ const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const SCRIPT = fs.readFileSync(path.join(ROOT, 'recut.user.js'), 'utf8');
 
-const TARGETS = [
+// ONLY=home,chart reshoots just those, so one changed page does not cost a
+// full pass over IMDb.
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null;
+const ALL_TARGETS = [
   { name: 'home', imdbPath: '/', height: 1150, label: 'the homepage' },
   { name: 'title', imdbPath: '/title/tt0120737/', height: 1150, label: 'a film' },
   { name: 'person', imdbPath: '/name/nm0000276/', height: 1250, label: 'a person' },
   { name: 'media', imdbPath: '/name/nm0000276/', height: 720, label: 'the media row' },
   { name: 'ratings', imdbPath: '/title/tt0120737/ratings/', height: 1100, label: 'the ratings breakdown' },
   { name: 'episodes', imdbPath: '/title/tt0903747/episodes/', height: 1200, label: 'an episode list' },
-  { name: 'chart', imdbPath: '/chart/top/', height: 1150, label: 'the Top 250' }
+  { name: 'chart', imdbPath: '/chart/top/', height: 1150, label: 'the Top 250' },
+  { name: 'boxoffice', imdbPath: '/chart/boxoffice/', height: 1000, label: 'the box office chart' }
 ];
+const TARGETS = ONLY ? ALL_TARGETS.filter((t) => ONLY.includes(t.name)) : ALL_TARGETS;
 
 fs.mkdirSync(SHOTS, { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
@@ -57,6 +63,10 @@ function extractPayload(html) {
 // and the screenshot would show "no match" where the real page shows a score.
 const SHIM = `
 (function () {
+  // IMDb keys its picks rows to the Amazon session cookie the site sets for
+  // every visitor. A synthetic one stands in here: the API answers it with
+  // the unpersonalised list, which is what a signed-out visitor sees.
+  try { document.cookie = 'session-id=133-4098123-7811234; path=/'; } catch (e) {}
   var store = { 'setting:theme': 'dark' };
   window.GM_getValue = function (k, d) { return k in store ? store[k] : d; };
   window.GM_setValue = function (k, v) { store[k] = v; };
