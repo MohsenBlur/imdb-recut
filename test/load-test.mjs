@@ -181,6 +181,7 @@ console.log('\n[density] no single entry may set the height of its whole section
   // cast section 46,252 of the page's 51,670px, and 40 season tiles wrapped
   // into four banks. Both are properties of the CSS, so both are asserted
   // against the CSS rather than against a screenshot nobody re-reads.
+  const NL = new RegExp(String.fromCharCode(92) + 'r?' + String.fromCharCode(92) + 'n');
   const rule = (sel) => (new RegExp(sel.replace(/\./g, '\\.') + ' \\{[^}]*\\}').exec(SRC) || [''])[0];
 
   const cast = rule('.imdbc-cast');
@@ -195,6 +196,20 @@ console.log('\n[density] no single entry may set the height of its whole section
   check('seasons scroll sideways rather than wrapping into banks',
     /overflow-x:\s*auto/.test(seasons) && !/flex-wrap:\s*wrap/.test(seasons),
     seasons.replace(/\s+/g, ' ').slice(0, 90));
+
+  // The role overlay is the second thing to learn the lightbox's lesson: an
+  // element appended to <body> is created display:none by the takeover rule,
+  // present in the DOM and invisible.
+  const append = (SRC.split(NL).find((l) => l.includes('root.appendChild(box)')) || '').trim();
+  check('the role overlay is appended inside the root, not the body',
+    /const root = document\.getElementById\('imdbc-root'\)/.test(SRC) && !!append, append || '(not found)');
+  check('every dismissal the user was promised is wired',
+    /removeEventListener\('mousedown', away, true\)/.test(SRC)
+    && /e\.key === 'Escape'/.test(SRC)
+    && /if \(wasOpen\) return;/.test(SRC));
+  check('the affordance sits outside the clamp, or the clamp eats it',
+    /\.ch\.is-more \.names \{[^}]*line-clamp/.test(SRC)
+    && /\.ch\.is-more \.mr \{[^}]*display: block/.test(SRC));
 
   check('no character list is joined without passing through the cap',
     !/characters\.join\(/.test(SRC),

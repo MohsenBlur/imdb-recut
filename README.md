@@ -36,7 +36,7 @@ including the homepage takeover, so it can be cut back further than the defaults
 
 | Page | What you get |
 | --- | --- |
-| `/title/tt…` | IMDb, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer · full cast with characters · sortable user reviews · seasons with each one's episode count and rating · photos · more-like-this · Letterboxd and Trakt links |
+| `/title/tt…` | IMDb, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer · full cast with the parts each played — click a role line for all of them · sortable user reviews · seasons with each one's episode count and rating · photos · more-like-this · Letterboxd and Trakt links |
 | `/name/nm…` | Known-for, then the *complete* filmography with the character played on every row, category tabs, filter and sort |
 | `…/ratings` `…/fullcredits` `…/episodes` `…/reviews` | Rating histogram and per-country breakdown · every cast and crew member · season tabs carrying their own ratings · the full review list |
 | `/find` `/search/title` | Results as rows, plus type-ahead in the header |

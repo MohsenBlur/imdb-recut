@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.11.1
+// @version      2.12.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -922,17 +922,55 @@
    */
   const ROLE_SHOWN = 4;
   const ROLE_FETCH = 24;
+  // A filmography row only has to know whether there is more behind it - the
+  // overlay fetches the real list - so one name past the shown four is enough.
+  const ROLE_CREDIT = ROLE_SHOWN + 1;
 
-  function roleList(characters) {
+  function roleList(characters, cap) {
     const list = (characters || []).filter(Boolean);
     if (list.length <= ROLE_SHOWN) return { text: list.join(' / '), more: '' };
+    // A list is only of unknown length when it sits EXACTLY on its cap: a capped
+    // query cannot return more than it was asked for, so anything longer came
+    // from the page's own payload and is complete. That is the path where Dan
+    // Castellaneta reads "+1,295 more" rather than a shrug.
+    const atCap = cap && list.length === cap;
     return {
       text: list.slice(0, ROLE_SHOWN).join(' / '),
-      // Only a list sitting exactly on the fetch cap is of unknown length. The
-      // page's own payload is not capped by us and carries the real total, so
-      // Dan Castellaneta reads "+1,295 more" rather than a shrug.
-      more: list.length === ROLE_FETCH ? '+ more' : `+${num(list.length - ROLE_SHOWN)} more`
+      more: atCap ? '+ more' : `+${num(list.length - ROLE_SHOWN)} more`
     };
+  }
+
+  /**
+   * The role line, two lines tall at most, and a button when there is more
+   * behind it. `nameId` and `titleId` are what the overlay needs to go and
+   * fetch the rest, since the list we hold is capped at ROLE_FETCH.
+   */
+  function roleLine(cls, characters, nameId, titleId, cap) {
+    const shown = roleList(characters, cap);
+    if (!shown.text) return '';
+    if (!shown.more || !nameId || !titleId) return html`<span class="${cls}">${shown.text}</span>`;
+    // The names are clamped and the affordance is not: with both inside one
+    // clamped box the "+1,295 more" was the first thing the clamp cut off, so
+    // the only hint that there was anything behind the line was invisible.
+    return html`<button type="button" class="${cls} is-more" aria-expanded="false"
+      data-imdbc-roles="${nameId + '|' + titleId}"
+      title="Show every part played"><span class="names">${shown.text}</span><span class="mr">${shown.more}</span></button>`;
+  }
+
+  /** Everything one person played in one title - all 1,299, when asked for. */
+  function fetchPersonRoles(titleId, nameId) {
+    return memoize(`roles:${titleId}:${nameId}`, 30 * 60 * 1000, async () => {
+      const data = await gql(`{ title(id: ${gqlStr(titleId)}) {
+        credits(first: 1, filter: { names: [${gqlStr(nameId)}] }) {
+          edges { node { name { nameText { text } } ... on Cast { characters { name } } } }
+        }
+      } }`);
+      const node = edges(data && data.title && data.title.credits)[0];
+      return {
+        name: (node && node.name && node.name.nameText && node.name.nameText.text) || '',
+        characters: ((node && node.characters) || []).map((c) => c && c.name).filter(Boolean)
+      };
+    });
   }
 
   const CAST_FIELDS = `
@@ -1087,7 +1125,7 @@
         text
         attributes { text }
         category { text traits }
-        characters(first: 4) { edges { node { name } } }
+        characters(first: ${ROLE_CREDIT}) { edges { node { name } } }
         episodeCredits(first: 1) {
           total
           yearRange { year endYear }
@@ -1637,13 +1675,55 @@ html.imdbc-off #imdbc-root { display: none !important; }
 }
 .imdbc-person .ph img { width: 100%; height: 100%; object-fit: cover; }
 .imdbc-person .nm { font-weight: 600; font-size: var(--fs-item); line-height: 1.35; }
-/* Belt and braces: the cap above bounds how many roles are printed, this
-   bounds how tall any single one can make the card. */
+/* Two lines, never more. The cap above bounds how many roles are printed; this
+   bounds how tall one very long character NAME can make the card. */
 .imdbc-person .ch {
   font-size: var(--fs-small); color: var(--imdbc-muted); line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 :where(#imdbc-root) .mr { color: var(--imdbc-faint); white-space: nowrap; }
+
+/* A role line with more behind it is a button, and has to stop looking like a
+   <button> and start looking like the text it replaced. */
+:where(#imdbc-root) .ch.is-more,
+:where(#imdbc-root) .rl.is-more,
+:where(#imdbc-root) .rolebtn {
+  display: block; width: 100%; padding: 0; margin: 0; border: 0; background: none;
+  font: inherit; text-align: left; cursor: pointer; color: inherit;
+}
+:where(#imdbc-root) .ch.is-more .names {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* It is the only thing telling you the line can be opened, so it has to read
+   as something you can press without shouting on every card that has one. */
+:where(#imdbc-root) .ch.is-more .mr { display: block; font-size: var(--fs-tiny); }
+:where(#imdbc-root) .is-more .mr,
+:where(#imdbc-root) .rolebtn .mr {
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+:where(#imdbc-root) .rolebtn { display: inline; width: auto; font-weight: 700; }
+:where(#imdbc-root) .ch.is-more:hover .mr,
+:where(#imdbc-root) .rl.is-more:hover .mr,
+:where(#imdbc-root) .rolebtn:hover .mr { color: var(--imdbc-link); text-decoration: underline; }
+
+.imdbc-roles {
+  position: fixed; inset: 0; z-index: 120; display: grid; place-items: center;
+  background: rgba(0,0,0,.55); padding: 24px;
+}
+.imdbc-roles .panel {
+  background: var(--imdbc-panel); border: 1px solid var(--imdbc-border); border-radius: 13px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.4); padding: 16px 18px;
+  width: min(760px, 100%); max-height: min(70vh, 640px); overflow: auto;
+}
+.imdbc-roles .head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; font-size: var(--fs-item);
+}
+.imdbc-roles .list { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.imdbc-roles .list span {
+  font-size: var(--fs-small); color: var(--imdbc-text);
+  background: var(--imdbc-panel-2); border-radius: 7px; padding: 3px 9px;
+}
 .imdbc-person .ep { font-size: var(--fs-tiny); color: var(--imdbc-faint); }
 .imdbc-person .attr { font-size: var(--fs-tiny); color: var(--imdbc-faint); font-style: italic; }
 
@@ -2720,7 +2800,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${sectionHead('Cast', num(castCat.total), html`
               <input type="search" data-imdbc-cc-filter placeholder="Filter cast or character" aria-label="Filter cast">`)}
             <div class="imdbc-cast" data-imdbc-cc-grid>
-              ${castCat.people.map((p) => personCard(p, { showEpisodes: false }))}
+              ${castCat.people.map((p) => personCard(p, { showEpisodes: false, titleId: ent.id }))}
             </div>
           </section>` : ''}
 
@@ -2731,7 +2811,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
               ${c.people.map((p) => html`
                 <div class="imdbc-crewrow">
                   <a class="nm" href="${nameUrl(p.id)}">${p.name}</a>
-                  ${p.characters.length ? html`<span class="rl">${roleList(p.characters).text}${roleList(p.characters).more ? html` <span class="mr">${roleList(p.characters).more}</span>` : ''}</span>` : ''}
+                  ${roleLine('rl', p.characters, p.id, ent.id, ROLE_FETCH)}
                   ${p.attributes.length && p.attributes[0] ? html`<span class="at">${p.attributes.join(', ')}</span>` : ''}
                 </div>`)}
             </div>
@@ -2753,7 +2833,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
               || p.characters.some((c) => c.toLowerCase().includes(q)))
             : castCat.people;
           grid.innerHTML = list.length
-            ? list.map((p) => interpolate(personCard(p, { showEpisodes: false }))).join('')
+            ? list.map((p) => interpolate(personCard(p, { showEpisodes: false, titleId: ent.id }))).join('')
             : interpolate(html`<div class="imdbc-empty">No cast member matches that.</div>`);
         }, 140);
       });
@@ -3662,12 +3742,81 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     if (q) q.focus();
   }
 
+  /**
+   * A cast card cannot carry 1,299 parts, and truncating them loses the list
+   * altogether. So the card shows the handful worth reading and the whole list
+   * opens over the page - dismissed by clicking anywhere, including the line
+   * that opened it.
+   */
+  let rolesOpen = null;
+
+  function closeRoles() {
+    if (!rolesOpen) return;
+    const { box, away, key, trigger } = rolesOpen;
+    rolesOpen = null;
+    box.remove();
+    document.removeEventListener('mousedown', away, true);
+    document.removeEventListener('keydown', key, true);
+    if (trigger && trigger.isConnected) trigger.setAttribute('aria-expanded', 'false');
+  }
+
+  async function openRoles(trigger) {
+    const pair = (trigger.getAttribute('data-imdbc-roles') || '').split('|');
+    const [nameId, titleId] = pair;
+    if (!nameId || !titleId) return;
+
+    const wasOpen = rolesOpen && rolesOpen.trigger === trigger;
+    closeRoles();
+    if (wasOpen) return;                       // a second click on the same line closes it
+
+    const root = document.getElementById('imdbc-root');
+    if (!root) return;
+    const box = document.createElement('div');
+    box.className = 'imdbc-roles';
+    box.innerHTML = interpolate(html`<div class="panel"><p class="imdbc-loading">Loading every part</p></div>`);
+    root.appendChild(box);
+
+    const away = (e) => { if (!box.querySelector('.panel').contains(e.target) || e.target.closest('[data-imdbc-roles-close]')) closeRoles(); };
+    const key = (e) => { if (e.key === 'Escape') closeRoles(); };
+    // Next tick, or the click that opened this closes it again.
+    setTimeout(() => {
+      if (!rolesOpen) return;
+      document.addEventListener('mousedown', away, true);
+      document.addEventListener('keydown', key, true);
+    }, 0);
+    rolesOpen = { box, away, key, trigger };
+    trigger.setAttribute('aria-expanded', 'true');
+
+    let roles;
+    try {
+      roles = await fetchPersonRoles(titleId, nameId);
+    } catch (e) {
+      warn('roles lookup failed', e);
+      roles = null;
+    }
+    if (!rolesOpen || rolesOpen.box !== box) return;
+
+    if (!roles || !roles.characters.length) {
+      box.innerHTML = interpolate(html`<div class="panel">
+        <p class="imdbc-note">Couldn\u2019t load the full list.
+          <a href="${titleUrl(titleId) + 'fullcredits/'}">Full credits on IMDb</a>.</p>
+      </div>`);
+      return;
+    }
+    box.innerHTML = interpolate(html`<div class="panel">
+      <div class="head">
+        <span><b>${roles.name}</b> <span class="imdbc-note">\u00b7 ${num(roles.characters.length)} part${roles.characters.length === 1 ? '' : 's'}</span></span>
+        <button type="button" class="imdbc-btn imdbc-btn-ghost" data-imdbc-roles-close>Close</button>
+      </div>
+      <div class="list">${roles.characters.map((c) => html`<span>${c}</span>`)}</div>
+    </div>`);
+  }
+
   function initials(name) {
     return String(name || '?').split(/\s+/).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('');
   }
 
-  function personCard(p, { showEpisodes = true } = {}) {
-    const chars = roleList(p.characters);
+  function personCard(p, { showEpisodes = true, titleId = '' } = {}) {
     const attrs = p.attributes && p.attributes.length ? p.attributes.join(', ') : '';
     const eps = showEpisodes && p.episodeCount
       ? `${num(p.episodeCount)} episode${p.episodeCount === 1 ? '' : 's'}${p.episodeYears ? ' · ' + p.episodeYears : ''}`
@@ -3680,7 +3829,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         </a>
         <div>
           <div class="nm"><a href="${nameUrl(p.id)}">${p.name}</a></div>
-          ${chars.text ? html`<div class="ch">${chars.text}${chars.more ? html` <span class="mr">${chars.more}</span>` : ''}</div>` : ''}
+          ${roleLine('ch', p.characters, p.id, titleId, ROLE_FETCH)}
           ${attrs ? html`<div class="attr">${attrs}</div>` : ''}
           ${eps ? html`<div class="ep">${eps}</div>` : ''}
         </div>
@@ -3991,7 +4140,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         return;
       }
       const shown = (state.expanded || state.filter) ? list : list.slice(0, CAST_PREVIEW);
-      grid.innerHTML = shown.map((p) => interpolate(personCard(p, { showEpisodes: t.isSeries }))).join('');
+      grid.innerHTML = shown.map((p) => interpolate(personCard(p, { showEpisodes: t.isSeries, titleId: t.id }))).join('');
 
       const hidden = list.length - shown.length;
       const bits = [];
@@ -4256,7 +4405,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   function knownForCard(c) {
     const poster = thumb(c.poster, 240, 360, c.posterSize);
-    const named = roleList(c.characters);
+    const named = roleList(c.characters, ROLE_CREDIT);
     const role = named.text ? named.text + (named.more ? ' ' + named.more : '') : (c.roleText || c.category || '');
     return html`
       <div class="imdbc-card">
@@ -4307,14 +4456,16 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   }
   const ALL_CATEGORIES = '--all-credits--';
 
-  function creditRow(c) {
+  function creditRow(c, nameId) {
     const poster = thumb(c.poster, 88, 132, c.posterSize);
     const type = typeLabel(c);
 
     let role = '';
-    const named = roleList(c.characters);
+    const named = roleList(c.characters, ROLE_CREDIT);
     if (named.text) {
-      role = interpolate(html`as <b>${named.text}</b>${named.more ? html` <span class="imdbc-note">${named.more}</span>` : ''}`);
+      role = named.more && nameId
+        ? interpolate(html`as ${roleLine('rolebtn', c.characters, nameId, c.id, ROLE_CREDIT)}`)
+        : interpolate(html`as <b>${named.text}</b>`);
     }
     else if (c.roleText) role = interpolate(html`<b>${c.roleText}</b>`);
     else if (c.category) role = interpolate(html`${c.category}`);
@@ -4432,7 +4583,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       if (countEl) countEl.textContent = num(list.length) + (state.complete ? '' : '+');
       const slice = list.slice(0, state.shown);
       listEl.innerHTML = slice.length
-        ? slice.map((c) => interpolate(creditRow(c))).join('')
+        ? slice.map((c) => interpolate(creditRow(c, p.id))).join('')
         : interpolate(html`<div class="imdbc-empty">Nothing here.</div>`);
 
       const bits = [];
@@ -4652,6 +4803,15 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       root = document.createElement('div');
       root.id = 'imdbc-root';
       document.body.appendChild(root);
+      // Delegated once: the cast grid, the full-credits page and a person's
+      // filmography all repaint their own lists, and none of them should have
+      // to remember to rewire this.
+      root.addEventListener('click', (e) => {
+        const trigger = e.target.closest('[data-imdbc-roles]');
+        if (!trigger) return;
+        e.preventDefault();
+        openRoles(trigger);
+      });
     }
     return root;
   }

@@ -482,3 +482,42 @@ One more instance of the temporal dead zone, in both the script and the test:
 `CAST_FIELDS` is a template literal evaluated at load, so `ROLE_FETCH` has to be
 declared above it. `node --check` passes either way - the load test is what
 catches it, and the live suite caught its own copy of the same ordering bug.
+
+### The role line, second pass
+
+Capping at four names and printing `+1,295 more` bounded the damage but threw
+the list away. It is now two lines and a button: the line opens the **whole**
+list over the page, dismissed by clicking anywhere, pressing Escape, or
+clicking the line again.
+
+The full list is fetched only when asked for, which needs a way to get one
+person's characters on one title:
+
+```
+title(id: "tt0096697") {
+  credits(first: 1, filter: { names: ["nm0144657"] }) {
+    edges { node { name { nameText { text } } ... on Cast { characters { name } } } } } }
+```
+
+`names` is the field (`nameIds` errors with *Did you mean "names"?*). 33 KB for
+Castellaneta's 1,299, memory-cached, and nothing is fetched until a click.
+
+**The remainder can only be stated when the list is complete**, and the three
+surfaces get their lists under three different caps: the page's own payload is
+uncapped, the cast fetch asks for `ROLE_FETCH` (24), a filmography row asks for
+`ROLE_CREDIT` (5) since it only needs to know whether there IS more. So the cap
+travels with the list, and the test for "is this truncated" is
+`length === cap`, not `>=`: a capped query cannot return more than it asked
+for, so a longer list came from the payload and is complete. With `>=` the
+1,299-long payload list read `+ more` instead of `+1,295 more` - caught by the
+live suite, which exercises both paths.
+
+**The affordance has to sit outside the clamp.** With the names and the
+`+1,295 more` inside one two-line clamped box, the clamp cut the affordance
+off first: the only hint the line could be opened was the thing being hidden.
+The names are clamped; the remainder is a block beneath them.
+
+The overlay is appended into `#imdbc-root`, not `<body>` - the same trap the
+photo lightbox fell into, where the takeover's own body-hiding rule creates the
+element `display:none`. `load-test.mjs` asserts the append target, all three
+dismissals, and that the affordance is outside the clamp.

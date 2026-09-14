@@ -28,7 +28,7 @@ const DECLS = [
   // Order matters: these are concatenated as written, so anything a template
   // literal interpolates has to be declared before it - the same temporal
   // dead zone the script itself has to respect.
-  'ROLE_SHOWN', 'ROLE_FETCH', 'roleList',
+  'ROLE_SHOWN', 'ROLE_FETCH', 'ROLE_CREDIT', 'roleList',
   'GQL_ENDPOINT', 'GQL_HEADERS', 'CAST_FIELDS', 'PERSON_CREDIT_FIELDS', 'REVIEW_SORTS',
   'edges', 'gqlStr', 'num', 'compactNum', 'runtimeText', 'yearText', 'imgSize',
   'GQL_URL_MAX',
@@ -37,7 +37,7 @@ const DECLS = [
   'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits',
 ];
 
-const EXPORTS = ['creditCategories', 'gql', 'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits', 'REVIEW_SORTS', 'GQL_HEADERS', 'GQL_URL_MAX', 'roleList', 'ROLE_SHOWN', 'ROLE_FETCH'];
+const EXPORTS = ['creditCategories', 'gql', 'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits', 'REVIEW_SORTS', 'GQL_HEADERS', 'GQL_URL_MAX', 'roleList', 'ROLE_SHOWN', 'ROLE_FETCH', 'ROLE_CREDIT'];
 const body = DECLS.map(sliceDecl).join('\n\n');
 
 let calls = 0;
@@ -189,14 +189,19 @@ console.log('\n[characters] tt0096697 (The Simpsons) — one voice, 1,299 parts'
   check('the famous case is present and capped', !!homer && homer.characters.length === M.ROLE_FETCH,
     homer ? `${homer.characters.length} characters` : 'not in the first 60');
 
-  const shown = M.roleList(homer.characters);
+  // What the cast card does with a list that came back under the fetch cap.
+  const shown = M.roleList(homer.characters, M.ROLE_FETCH);
   check('only a readable handful is printed',
     shown.text.split(' / ').length === M.ROLE_SHOWN, shown.text);
   check('a list sitting on the cap does not claim a total it does not have',
     shown.more === '+ more', shown.more);
+  // And what it does with the page's own payload, which we did not cap.
+  const whole = Array.from({ length: 1299 }, (_, i) => 'Role ' + i);
   check('a list we hold in full reports the real remainder',
-    M.roleList(Array.from({ length: 1299 }, (_, i) => 'Role ' + i)).more === '+1,295 more',
-    M.roleList(Array.from({ length: 1299 }, (_, i) => 'Role ' + i)).more);
+    M.roleList(whole, M.ROLE_FETCH).more === '+1,295 more', M.roleList(whole, M.ROLE_FETCH).more);
+  check('a filmography row knows there is more without knowing how much',
+    M.roleList(whole.slice(0, M.ROLE_CREDIT), M.ROLE_CREDIT).more === '+ more',
+    M.roleList(whole.slice(0, M.ROLE_CREDIT), M.ROLE_CREDIT).more);
   check('a short list is printed whole with nothing appended',
     M.roleList(['Homer', 'Krusty']).text === 'Homer / Krusty' && M.roleList(['Homer', 'Krusty']).more === '');
   check('no characters yields no text', M.roleList([]).text === '' && M.roleList(undefined).text === '');
