@@ -50,6 +50,9 @@ const PRE = `
     for (let i = 0; i < values.length; i++) out += interpolate(values[i]) + strings[i + 1];
     return raw(out);
   }
+  // This suite is about the Letterboxd button; the media chips that share the
+  // same row have their own coverage.
+  const mediaChips = () => '';
 `;
 
 const NAMES = ['MARKS', 'LETTERBOXD_TYPES', 'letterboxdRedirect', 'actionsHtml'];

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.3.0
+// @version      2.5.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @match        https://www.imdb.com/*
@@ -1234,7 +1234,7 @@
    * upgrades the href, or removes the button when Letterboxd has no page.
    */
   function actionsHtml(t) {
-    const parts = [];
+    const parts = [mediaChips(t)].filter(Boolean);
     if (LETTERBOXD_TYPES.test(t.typeId) && t.lbx !== null) {
       const href = (t.lbx && safeUrl(t.lbx.url)) || letterboxdRedirect(t.id);
       parts.push(interpolate(html`
@@ -1620,67 +1620,78 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-score .imdbc-loading::before { width: 14px; height: 14px; margin-top: 5px; }
 
 /* ── external links ────────────────────────────────────────────────────── */
-.imdbc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.imdbc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; align-items: center; }
 .imdbc-ext { display: inline-flex; align-items: center; gap: 9px; padding: 8px 14px; }
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
 
-/* ── trailer and videos ────────────────────────────────────────────────── */
-.imdbc-player { max-width: 860px; }
-.imdbc-vhero {
-  position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; padding: 0;
-  border-radius: 12px; overflow: hidden; border: 1px solid var(--imdbc-border);
+/* ── media chips and the panel they open ───────────────────────────────── */
+.imdbc-media-btns { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.imdbc-tpreview {
+  position: relative; width: 168px; aspect-ratio: 16 / 9; padding: 0; flex: 0 0 auto;
+  border: 1px solid var(--imdbc-border); border-radius: 9px; overflow: hidden;
   background: var(--imdbc-panel-2); cursor: pointer;
 }
-.imdbc-vhero.is-loading { display: grid; place-items: center; cursor: default; aspect-ratio: auto; padding: 40px 16px; }
-.imdbc-vhero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.imdbc-tpreview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.imdbc-tpreview .play {
+  position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%);
+  width: 34px; height: 34px; border-radius: 50%; background: rgba(0,0,0,.6);
+  border: 2px solid rgba(255,255,255,.92);
+}
+.imdbc-tpreview .play::after {
+  content: ''; position: absolute; left: 53%; top: 50%; transform: translate(-50%, -50%);
+  border-style: solid; border-width: 7px 0 7px 11px; border-color: transparent transparent transparent #fff;
+}
+.imdbc-tpreview:hover .play { background: rgba(0,0,0,.8); }
+.imdbc-tpreview .lbl {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 8px 5px; color: #fff;
+  font-size: var(--fs-tiny); text-align: left;
+  background: linear-gradient(to top, rgba(0,0,0,.85), transparent);
+}
+.imdbc-vhero { cursor: pointer; }
 .imdbc-vhero .play {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 68px; height: 68px; border-radius: 50%; background: rgba(0,0,0,.62);
-  border: 2px solid rgba(255,255,255,.9); transition: background .12s ease;
+  width: 62px; height: 62px; border-radius: 50%; background: rgba(0,0,0,.62);
+  border: 2px solid rgba(255,255,255,.9);
 }
 .imdbc-vhero .play::after {
-  content: ''; position: absolute; left: 52%; top: 50%; transform: translate(-50%, -50%);
-  border-style: solid; border-width: 13px 0 13px 21px; border-color: transparent transparent transparent #fff;
+  content: ''; position: absolute; left: 53%; top: 50%; transform: translate(-50%, -50%);
+  border-style: solid; border-width: 12px 0 12px 19px; border-color: transparent transparent transparent #fff;
 }
-.imdbc-vhero:hover .play { background: rgba(0,0,0,.8); }
-.imdbc-vhero .meta {
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 30px 16px 12px; text-align: left;
-  color: #fff; font-size: var(--fs-small);
-  background: linear-gradient(to top, rgba(0,0,0,.82), transparent);
+.imdbc-vhero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.imdbc-chip-media { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; }
+.imdbc-chip-media small { color: var(--imdbc-faint); font-size: var(--fs-tiny); font-weight: 500; }
+.imdbc-chip-media .ic { width: 15px; height: 15px; flex: 0 0 auto; position: relative; opacity: .85; }
+.imdbc-chip-media .ic.play::after {
+  content: ''; position: absolute; inset: 0; margin: auto;
+  border-style: solid; border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent currentColor;
 }
-.imdbc-video { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; background: #000; display: block; }
-.imdbc-vcaption { margin-top: 8px; font-size: var(--fs-small); color: var(--imdbc-muted); }
+.imdbc-chip-media .ic.pic {
+  border: 1.8px solid currentColor; border-radius: 3px;
+}
+.imdbc-chip-media .ic.pic::after {
+  content: ''; position: absolute; left: 1.5px; right: 1.5px; bottom: 1.5px; height: 5px;
+  background: currentColor; clip-path: polygon(0 100%, 32% 38%, 58% 100%, 72% 62%, 100% 100%);
+}
+.imdbc-chip-media.is-busy { opacity: .6; pointer-events: none; }
 
-.imdbc-vstrip { display: flex; gap: 12px; overflow-x: auto; padding: 16px 2px 4px; }
-.imdbc-vthumb {
-  flex: 0 0 auto; width: 176px; background: none; border: 1px solid transparent;
-  border-radius: 10px; padding: 6px; cursor: pointer; text-align: left;
-}
+.imdbc-mediapanel:empty { display: none; }
+.imdbc-mediapanel { margin: 18px 0 0; display: grid; gap: 12px; justify-items: start; }
+.imdbc-player { max-width: 720px; width: 100%; }
+
+.imdbc-vhero { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; border: 1px solid var(--imdbc-border); background: var(--imdbc-panel-2); }
+.imdbc-vhero.is-loading { display: grid; place-items: center; aspect-ratio: auto; padding: 32px 16px; }
+.imdbc-video { width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000; display: block; }
+.imdbc-vcaption { margin-top: 7px; font-size: var(--fs-small); color: var(--imdbc-muted); }
+
+.imdbc-vstrip { display: flex; gap: 8px; overflow-x: auto; padding: 2px; max-width: 720px; }
+.imdbc-vthumb { flex: 0 0 auto; width: 104px; background: none; border: 1px solid transparent; border-radius: 7px; padding: 3px; cursor: pointer; }
 .imdbc-vthumb:hover, .imdbc-vthumb.is-on { background: var(--imdbc-panel); border-color: var(--imdbc-border); }
-.imdbc-vthumb .th {
-  position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 7px;
-  overflow: hidden; background: var(--imdbc-panel-2);
-}
+.imdbc-vthumb .th { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 5px; overflow: hidden; background: var(--imdbc-panel-2); }
 .imdbc-vthumb .th img { width: 100%; height: 100%; object-fit: cover; }
-.imdbc-vthumb .dur {
-  position: absolute; right: 5px; bottom: 5px; background: rgba(0,0,0,.78); color: #fff;
-  font-size: 11px; padding: 1px 5px; border-radius: 4px; font-variant-numeric: tabular-nums;
-}
-.imdbc-vthumb .nm {
-  display: block; margin-top: 7px; font-size: var(--fs-small); line-height: 1.34;
-  color: var(--imdbc-muted); overflow: hidden; display: -webkit-box;
-  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
+.imdbc-vthumb .dur { position: absolute; right: 3px; bottom: 3px; background: rgba(0,0,0,.78); color: #fff; font-size: 10px; padding: 0 4px; border-radius: 3px; font-variant-numeric: tabular-nums; }
 
-/* ── photos ────────────────────────────────────────────────────────────── */
-.imdbc-photogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 46%), 1fr)); gap: 10px; }
-.imdbc-photo {
-  padding: 0; border: 1px solid var(--imdbc-border); border-radius: 9px; overflow: hidden;
-  background: var(--imdbc-panel-2); cursor: zoom-in; aspect-ratio: 3 / 2; display: block;
-}
-.imdbc-photo img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .18s ease; }
-.imdbc-photo:hover img { transform: scale(1.04); }
-
+/* ── lightbox ──────────────────────────────────────────────────────────── */
 .imdbc-lightbox {
   position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,.93);
   display: grid; grid-template-columns: 64px 1fr 64px; align-items: center; padding: 24px;
@@ -1702,7 +1713,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 @media (max-width: 760px) {
   .imdbc-lightbox { grid-template-columns: 44px 1fr 44px; padding: 12px; }
   .imdbc-lightbox .nav { font-size: 22px; }
-  .imdbc-vthumb { width: 144px; }
 }
 
 /* ── title sub-pages ───────────────────────────────────────────────────── */
@@ -2718,65 +2728,44 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   // ── rendering ─────────────────────────────────────────────────────────────
 
-  function videoSection(m) {
-    if (!settings.trailers || !(m.trailer || (m.videos && m.videos.length))) return '';
-    return interpolate(html`
-        <section class="imdbc-sec" data-imdbc-videos>
-          ${sectionHead(m.trailer && /trailer/i.test(m.trailer.type) ? 'Trailer' : 'Video',
-            m.videoTotal ? num(m.videoTotal) : '')}
-          <div class="imdbc-player" data-imdbc-player>${raw(playerHtml(m.trailer))}</div>
-          ${m.videos && m.videos.length > 1 ? html`
-            <div class="imdbc-vstrip" data-imdbc-vstrip>
-              ${m.videos.map((v) => html`
-                <button type="button" class="imdbc-vthumb${m.trailer && v.id === m.trailer.id ? ' is-on' : ''}" data-imdbc-video="${v.id}">
-                  <span class="th">${thumb(v.thumb, 240, 135, v.thumbSize)
-                    ? html`<img src="${thumb(v.thumb, 240, 135, v.thumbSize)}" alt="" loading="lazy" decoding="async">` : ''}
-                    ${v.seconds ? html`<span class="dur">${videoTime(v.seconds)}</span>` : ''}</span>
-                  <span class="nm">${v.name}</span>
-                </button>`)}
-            </div>` : ''}
-        </section>`);
-  }
 
-  function photoSection(m) {
-    if (!settings.photos || !(m.images && m.images.length)) return '';
-    return interpolate(html`
-        <section class="imdbc-sec" data-imdbc-photos>
-          ${sectionHead('Photos', m.imageTotal ? num(m.imageTotal) : num(m.images.length))}
-          <div class="imdbc-photogrid" data-imdbc-photogrid>${raw(photoCells(m.images))}</div>
-          <div class="imdbc-more" data-imdbc-photos-more>
-            ${m.imageTotal > m.images.length
-              ? html`<button type="button" class="imdbc-btn" data-imdbc-photos-all>Show more photos</button>` : ''}
-          </div>
-        </section>`);
-  }
 
-  function photoCells(images) {
-    return images.map((img, i) => interpolate(html`
-      <button type="button" class="imdbc-photo" data-imdbc-photo="${i}" aria-label="${img.caption || 'Photo'}">
-        <img src="${thumb(img.url, 320, 214, img)}" alt="${img.caption}" loading="lazy" decoding="async">
-      </button>`)).join('');
-  }
 
-  function playerHtml(video) {
-    if (!video) return '';
-    const poster = thumb(video.thumb, 960, 540, video.thumbSize);
-    const src = bestSource(video);
-    if (!src) {
-      // No playable source: link out rather than show a dead play button.
-      return interpolate(html`
-        <a class="imdbc-vhero" href="https://www.imdb.com/video/${encodeURIComponent(video.id)}/" target="_blank" rel="noopener noreferrer">
-          ${poster ? html`<img src="${poster}" alt="">` : ''}
-          <span class="play" aria-hidden="true"></span>
-          <span class="meta"><b>${video.name}</b>${video.seconds ? html` · ${videoTime(video.seconds)}` : ''} · watch on IMDb</span>
-        </a>`);
-    }
-    return interpolate(html`
-      <button type="button" class="imdbc-vhero" data-imdbc-play="${video.id}">
-        ${poster ? html`<img src="${poster}" alt="">` : ''}
+
+  /**
+   * Trailers and photos cost one line near the top and nothing else until
+   * asked for: the player is built on click, and photos go straight to the
+   * lightbox without ever occupying page space.
+   */
+  function mediaChips(m) {
+    const hasTrailer = settings.trailers && m.trailer && bestSource(m.trailer);
+    const hasVideos = settings.trailers && m.videos && m.videos.length > 1;
+    const hasPhotos = settings.photos && m.images && m.images.length;
+    if (!hasTrailer && !hasVideos && !hasPhotos) return '';
+
+    const preview = hasTrailer ? interpolate(html`
+      <button type="button" class="imdbc-tpreview" data-imdbc-trailer aria-expanded="false"
+              title="${m.trailer.name}">
+        ${thumb(m.trailer.thumb, 240, 135, m.trailer.thumbSize)
+          ? html`<img src="${thumb(m.trailer.thumb, 240, 135, m.trailer.thumbSize)}" alt="" loading="lazy" decoding="async">` : ''}
         <span class="play" aria-hidden="true"></span>
-        <span class="meta"><b>${video.name}</b>${video.type ? html` · ${video.type}` : ''}${video.seconds ? html` · ${videoTime(video.seconds)}` : ''}</span>
-      </button>`);
+        <span class="lbl">Trailer${m.trailer.seconds ? html` · ${videoTime(m.trailer.seconds)}` : ''}</span>
+      </button>`) : '';
+
+    const buttons = [];
+    if (hasVideos) {
+      buttons.push(interpolate(html`
+        <button type="button" class="imdbc-btn imdbc-chip-media" data-imdbc-videos-open>
+          <span class="ic play" aria-hidden="true"></span>${compactNum(m.videoTotal || m.videos.length)} videos
+        </button>`));
+    }
+    if (hasPhotos) {
+      buttons.push(interpolate(html`
+        <button type="button" class="imdbc-btn imdbc-chip-media" data-imdbc-photos>
+          <span class="ic pic" aria-hidden="true"></span>${compactNum(m.imageTotal || m.images.length)} photos
+        </button>`));
+    }
+    return preview + (buttons.length ? interpolate(html`<span class="imdbc-media-btns">${raw(buttons.join(''))}</span>`) : '');
   }
 
   function playInline(host, video) {
@@ -2788,64 +2777,93 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       <div class="imdbc-vcaption">${video.name}${video.seconds ? html` · ${videoTime(video.seconds)}` : ''}</div>`);
   }
 
+
   function wireMedia(root, m) {
     const token = renderSeq;
     const fresh = () => token === renderSeq && root.isConnected;
+    const panel = root.querySelector('[data-imdbc-mediapanel]');
+    let images = (m.images || []).slice();
+    let imagesComplete = !(m.imageTotal > images.length);
 
-    // ── videos ──
-    const videoSec = root.querySelector('[data-imdbc-videos]');
-    if (videoSec) {
-      const player = videoSec.querySelector('[data-imdbc-player]');
-      videoSec.addEventListener('click', async (e) => {
-        const play = e.target.closest('[data-imdbc-play]');
-        if (play && m.trailer) { playInline(player, m.trailer); return; }
+    const collapse = () => {
+      if (panel) panel.innerHTML = '';
+      const btn = root.querySelector('[data-imdbc-trailer]');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    };
 
-        const pick = e.target.closest('[data-imdbc-video]');
-        if (!pick) return;
-        const id = pick.getAttribute('data-imdbc-video');
-        for (const b of videoSec.querySelectorAll('[data-imdbc-video]')) b.classList.toggle('is-on', b === pick);
-        if (m.trailer && id === m.trailer.id) { playInline(player, m.trailer); return; }
-        player.innerHTML = interpolate(html`<div class="imdbc-vhero is-loading"><span class="imdbc-loading">loading video</span></div>`);
+    async function openPhotos() {
+      const chip = root.querySelector('[data-imdbc-photos]');
+      if (!imagesComplete) {
+        if (chip) chip.classList.add('is-busy');
         try {
-          const v = await fetchVideo(id);
+          const got = await fetchImages(m.kind, m.id, 120);
           if (!fresh()) return;
-          if (v && bestSource(v)) playInline(player, v);
-          else player.innerHTML = playerHtml(v || m.trailer);
-        } catch (err) {
-          warn('video fetch failed', err);
-          if (!fresh()) return;
-          player.innerHTML = interpolate(html`<div class="imdbc-vhero is-loading"><span class="imdbc-note">That video could not be loaded. <a href="https://www.imdb.com/video/${encodeURIComponent(id)}/">Watch it on IMDb</a>.</span></div>`);
+          if (got && got.images.length) images = got.images;
+          imagesComplete = true;
+        } catch (e) {
+          warn('photo fetch failed', e);   // fall through with what we have
+        } finally {
+          if (chip) chip.classList.remove('is-busy');
         }
-      });
+      }
+      if (fresh() && images.length) openLightbox(images, 0);
     }
 
-    // ── photos ──
-    const photoSec = root.querySelector('[data-imdbc-photos]');
-    if (!photoSec) return;
-    const grid = photoSec.querySelector('[data-imdbc-photogrid]');
-    const more = photoSec.querySelector('[data-imdbc-photos-more]');
-    let images = m.images.slice();
+    function showTrailer(autoplay) {
+      if (!panel || !(m.trailer || (m.videos && m.videos.length))) return;
+      const btn = root.querySelector('[data-imdbc-trailer]');
+      if (autoplay && btn && btn.getAttribute('aria-expanded') === 'true') { collapse(); return; }
+      if (btn) btn.setAttribute('aria-expanded', 'true');
 
-    photoSec.addEventListener('click', async (e) => {
-      const cell = e.target.closest('[data-imdbc-photo]');
-      if (cell) { openLightbox(images, Number(cell.getAttribute('data-imdbc-photo')) || 0); return; }
+      panel.innerHTML = interpolate(html`
+        <div class="imdbc-player" data-imdbc-player></div>
+        ${m.videos && m.videos.length > 1 ? html`
+          <div class="imdbc-vstrip">
+            ${m.videos.slice(0, 24).map((v) => html`
+              <button type="button" class="imdbc-vthumb${v.id === m.trailer.id ? ' is-on' : ''}" data-imdbc-video="${v.id}" title="${v.name}">
+                <span class="th">${thumb(v.thumb, 180, 101, v.thumbSize)
+                  ? html`<img src="${thumb(v.thumb, 180, 101, v.thumbSize)}" alt="" loading="lazy" decoding="async">` : ''}
+                  ${v.seconds ? html`<span class="dur">${videoTime(v.seconds)}</span>` : ''}</span>
+              </button>`)}
+          </div>` : ''}
+        <button type="button" class="imdbc-btn imdbc-btn-ghost" data-imdbc-media-close>Hide</button>`);
+      const player = panel.querySelector('[data-imdbc-player]');
+      // Opening the gallery should not start playing something unasked.
+      if (autoplay && m.trailer) playInline(player, m.trailer);
+      else if (m.trailer) {
+        player.innerHTML = interpolate(html`
+          <button type="button" class="imdbc-vhero" data-imdbc-video="${m.trailer.id}">
+            ${thumb(m.trailer.thumb, 960, 540, m.trailer.thumbSize)
+              ? html`<img src="${thumb(m.trailer.thumb, 960, 540, m.trailer.thumbSize)}" alt="">` : ''}
+            <span class="play" aria-hidden="true"></span>
+          </button>`);
+      }
+      panel.scrollIntoView({ block: 'nearest' });
+    }
 
-      if (!e.target.closest('[data-imdbc-photos-all]')) return;
-      more.innerHTML = interpolate(html`<span class="imdbc-loading">loading photos</span>`);
+    root.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-imdbc-trailer]')) { showTrailer(true); return; }
+      if (e.target.closest('[data-imdbc-videos-open]')) { showTrailer(false); return; }
+      if (e.target.closest('[data-imdbc-photos]')) { openPhotos(); return; }
+      if (e.target.closest('[data-imdbc-media-close]')) { collapse(); return; }
+
+      const pick = e.target.closest('[data-imdbc-video]');
+      if (!pick || !panel) return;
+      const id = pick.getAttribute('data-imdbc-video');
+      for (const b of panel.querySelectorAll('[data-imdbc-video]')) b.classList.toggle('is-on', b === pick);
+      const player = panel.querySelector('[data-imdbc-player]');
+      if (!player) return;
+      if (m.trailer && id === m.trailer.id) { playInline(player, m.trailer); return; }
+      player.innerHTML = interpolate(html`<div class="imdbc-vhero is-loading"><span class="imdbc-loading">loading video</span></div>`);
       try {
-        const got = await fetchImages(m.kind, m.id, 120);
+        const v = await fetchVideo(id);
         if (!fresh()) return;
-        if (got && got.images.length) {
-          images = got.images;
-          grid.innerHTML = photoCells(images);
-        }
-        more.innerHTML = (got && got.total > images.length)
-          ? interpolate(html`<a class="imdbc-btn" href="${(m.kind === 'name' ? nameUrl(m.id) : titleUrl(m.id)) + 'mediaindex/'}">All ${num(got.total)} on IMDb</a>`)
-          : '';
+        if (v && bestSource(v)) playInline(player, v);
+        else player.innerHTML = interpolate(html`<div class="imdbc-vhero is-loading"><span class="imdbc-note">No playable source. <a href="https://www.imdb.com/video/${encodeURIComponent(id)}/">Watch on IMDb</a>.</span></div>`);
       } catch (err) {
-        warn('photo fetch failed', err);
+        warn('video fetch failed', err);
         if (!fresh()) return;
-        more.innerHTML = interpolate(html`<span class="imdbc-note">More photos could not be loaded.</span>`);
+        player.innerHTML = interpolate(html`<div class="imdbc-vhero is-loading"><span class="imdbc-note">That video could not be loaded. <a href="https://www.imdb.com/video/${encodeURIComponent(id)}/">Watch on IMDb</a>.</span></div>`);
       }
     });
   }
@@ -3000,11 +3018,10 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${t.plot ? html`<p class="imdbc-plot">${t.plot}</p>` : ''}
             <div class="imdbc-scores" data-imdbc-scores>${raw(scoreStrip(t))}</div>
             <div class="imdbc-actions" data-imdbc-actions>${raw(actionsHtml(t))}</div>
+            <div class="imdbc-mediapanel" data-imdbc-mediapanel></div>
             ${crewLines.length ? html`<div class="imdbc-crew">${crewLines}</div>` : ''}
           </div>
         </div>
-
-        ${raw(videoSection(t))}
 
         ${t.episodes ? html`
           <section class="imdbc-sec" data-imdbc-seasons>
@@ -3036,8 +3053,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${sectionHead('More like this', '')}
             <div class="imdbc-cards">${t.moreLikeThis.map(titleCard)}</div>
           </section>` : ''}
-
-        ${raw(photoSection(t))}
 
         ${(t.countries.length || t.languages.length) ? html`
           <section class="imdbc-sec">
@@ -3451,10 +3466,10 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${p.bio ? html`
               <p class="imdbc-bio clamped" data-imdbc-bio>${p.bio}</p>
               <button type="button" class="imdbc-btn imdbc-btn-ghost" data-imdbc-bio-toggle>Read full bio</button>` : ''}
+            ${mediaChips(p) ? html`<div class="imdbc-actions">${raw(mediaChips(p))}</div>` : ''}
+            <div class="imdbc-mediapanel" data-imdbc-mediapanel></div>
           </div>
         </div>
-
-        ${raw(videoSection(p))}
 
         ${p.knownFor.length ? html`
           <section class="imdbc-sec">
@@ -3476,7 +3491,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           <div class="imdbc-more" data-imdbc-credit-more></div>
         </section>
 
-        ${raw(photoSection(p))}
       </div>`);
 
     wireTopBar(root);

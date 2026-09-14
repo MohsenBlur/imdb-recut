@@ -17,13 +17,14 @@ external links that are only shown when they actually resolve.
 
 ![A film page](docs/screenshots/title.png)
 
-### Trailers and photos
+### Trailers and photos, without the bloat
 
-The trailer plays inline from IMDb's own MP4 sources - no embedded player -
-with the rest of a title's videos in a strip beneath it. Photos open in a
-keyboard-navigable lightbox.
+One line: a small trailer preview and counts for the video and photo galleries.
+Nothing expands until it is clicked. The trailer then plays inline from IMDb's
+own MP4 sources rather than an embedded player, and photos open straight into a
+keyboard-navigable lightbox without ever occupying page space.
 
-![A trailer](docs/screenshots/trailer.png)
+![The media row](docs/screenshots/media.png)
 
 ### A person
 
