@@ -32,7 +32,8 @@ const ALL_TARGETS = [
   { name: 'ratings', imdbPath: '/title/tt0120737/ratings/', height: 1100, label: 'the ratings breakdown' },
   { name: 'episodes', imdbPath: '/title/tt0903747/episodes/', height: 1200, label: 'an episode list' },
   { name: 'chart', imdbPath: '/chart/top/', height: 1150, label: 'the Top 250' },
-  { name: 'boxoffice', imdbPath: '/chart/boxoffice/', height: 1000, label: 'the box office chart' }
+  { name: 'boxoffice', imdbPath: '/chart/boxoffice/', height: 1000, label: 'the box office chart' },
+  { name: 'seasons', imdbPath: '/title/tt0903747/', height: 1000, label: 'a TV show' }
 ];
 const TARGETS = ONLY ? ALL_TARGETS.filter((t) => ONLY.includes(t.name)) : ALL_TARGETS;
 
@@ -74,7 +75,8 @@ const SHIM = `
   window.GM_listValues = function () { return Object.keys(store); };
   window.GM_registerMenuCommand = function () {};
   window.GM_xmlhttpRequest = function (o) {
-    fetch('/x?u=' + encodeURIComponent(o.url), { headers: o.headers || {} })
+    fetch('/x?u=' + encodeURIComponent(o.url),
+      { method: o.method || 'GET', body: o.data || undefined, headers: o.headers || {} })
       .then(function (r) { return r.text().then(function (t) {
         o.onload && o.onload({ status: r.status, responseText: t, finalUrl: r.headers.get('x-final-url') || o.url });
       }); })

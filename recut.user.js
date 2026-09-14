@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.10.1
+// @version      2.11.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -350,6 +350,35 @@
   }
 
   /** Like netGet, but also hands back the URL the request actually ended on. */
+  /**
+   * Same transport, with a body. Only GraphQL uses it, and only when the query
+   * is too long to ride in a URL - see gql().
+   */
+  function netPost(url, body, { headers = {}, timeout = 20000 } = {}) {
+    if (!gmRequest) return Promise.reject(new Error('GM_xmlhttpRequest is unavailable'));
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const done = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+      try {
+        gmRequest({
+          method: 'POST',
+          url,
+          data: body,
+          headers: Object.assign({ Accept: '*/*' }, headers),
+          timeout,
+          onload: (r) => {
+            if (r.status >= 200 && r.status < 300) done(resolve, r.responseText);
+            else done(reject, new Error(`HTTP ${r.status} from ${url}`));
+          },
+          onerror: () => done(reject, new Error('network error for ' + url)),
+          ontimeout: () => done(reject, new Error('timed out: ' + url))
+        });
+      } catch (e) {
+        done(reject, e);
+      }
+    });
+  }
+
   function netGetFull(url, { headers = {}, timeout = 20000 } = {}) {
     if (!gmRequest) return Promise.reject(new Error('GM_xmlhttpRequest is unavailable'));
     return new Promise((resolve, reject) => {
@@ -497,12 +526,22 @@
     return m ? m[1] : '';
   }
 
+  /**
+   * A GET carries the whole query in the URL, and IMDb answers 414 past the
+   * usual 8 KB ceiling - measured: 36 aliased seasons make a 7,942-character
+   * URL and pass, 40 make 8,814 and do not. That is a real show (The Simpsons),
+   * so the aliased per-season query has to be able to leave the URL behind.
+   */
+  const GQL_URL_MAX = 7000;
+
   async function gql(query, { session = false } = {}) {
     const compact = query.replace(/\s+/g, ' ').trim();
     const url = GQL_ENDPOINT + '?query=' + encodeURIComponent(compact);
     const sid = session ? sessionId() : '';
     const headers = sid ? Object.assign({ 'x-amzn-sessionid': sid }, GQL_HEADERS) : GQL_HEADERS;
-    const text = await netGet(url, { headers });
+    const text = url.length > GQL_URL_MAX
+      ? await netPost(GQL_ENDPOINT, JSON.stringify({ query: compact }), { headers })
+      : await netGet(url, { headers });
     let json;
     try { json = JSON.parse(text); } catch (_) { throw new Error('IMDb GraphQL returned non-JSON'); }
     if (json.errors && json.errors.length) {
@@ -946,19 +985,66 @@
     };
   }
 
-  /** One aliased round trip for every season's episode count. */
-  async function fetchSeasonCounts(titleId, seasons) {
+  /**
+   * One aliased round trip for every season's episode count AND rating.
+   *
+   * IMDb publishes no rating for a season - measured: neither EpisodeConnection
+   * nor LocalizedDisplayableSeason carries one, and the schema refuses
+   * introspection, so the field names were confirmed by typo-probing for the
+   * "Did you mean" hints. So it is derived here: the mean of the season's own
+   * episode ratings. Cheap enough to take in one request - all 36 seasons and
+   * 789 episodes of The Simpsons came back in 1.7s and 55 KB.
+   *
+   * The mean is unweighted on purpose. Weighting by votes moves every season
+   * measured by less than 0.13, and it would let one breakout episode speak for
+   * a whole season.
+   */
+  async function fetchSeasonStats(titleId, seasons) {
     const list = seasons.slice(0, 60);
     if (!list.length) return {};
-    const aliases = list.map((s, i) => `s${i}: episodes(first: 0, filter: { includeSeasons: [${gqlStr(s)}] }) { total }`);
+    const aliases = list.map((s, i) => `s${i}: episodes(first: 250, filter: { includeSeasons: [${gqlStr(s)}] }) {
+      total edges { node { ratingsSummary { aggregateRating voteCount } } } }`);
     const data = await gql(`{ title(id: ${gqlStr(titleId)}) { episodes { ${aliases.join(' ')} } } }`);
     const ep = (data && data.title && data.title.episodes) || {};
     const out = {};
     list.forEach((s, i) => {
-      const v = ep['s' + i];
-      if (v && typeof v.total === 'number') out[s] = v.total;
+      const conn = ep['s' + i];
+      if (!conn) return;
+      const scored = edges(conn)
+        .map((node) => node && node.ratingsSummary)
+        .filter((r) => r && typeof r.aggregateRating === 'number');
+      const stat = { episodes: typeof conn.total === 'number' ? conn.total : null };
+      if (scored.length) {
+        stat.rated = scored.length;
+        stat.rating = scored.reduce((a, r) => a + r.aggregateRating, 0) / scored.length;
+        // Votes PER EPISODE, not summed: the thin-data test asks whether each
+        // episode's own rating is worth anything, and a summed total would let
+        // twenty flimsy episodes pass for one well-rated one.
+        stat.votes = Math.round(scored.reduce((a, r) => a + (r.voteCount || 0), 0) / scored.length);
+      }
+      out[s] = stat;
     });
     return out;
+  }
+
+  /** Shared by the title page's season grid and the episode page's season tabs. */
+  function seasonStats(titleId, seasons) {
+    // v2: the cached value was a bare episode count before the ratings existed.
+    return memoizeDisk('seasons:v2:' + titleId, 24 * 3600 * 1000, () => fetchSeasonStats(titleId, seasons));
+  }
+
+  /** "★ 8.7" in the shared band colours, or nothing when no episode is rated. */
+  function seasonRating(stat) {
+    if (!stat || typeof stat.rating !== 'number') return '';
+    // Say exactly what went into it. Episodes go uncounted for two reasons -
+    // nobody has rated them yet, or the season ran past the 250 the query asks
+    // for - and "N of M" is true either way.
+    const all = stat.episodes === stat.rated || typeof stat.episodes !== 'number';
+    const note = all
+      ? `Mean of all ${stat.rated} episode rating${stat.rated === 1 ? '' : 's'}`
+      : `Mean of ${stat.rated} of this season's ${stat.episodes} episodes`;
+    return html`<span class="rt ${ratingClasses(stat.rating, 10, stat.votes)}"
+      title="${note}">★ ${stat.rating.toFixed(1)}</span>`;
   }
 
   const PERSON_CREDIT_FIELDS = `
@@ -1536,6 +1622,9 @@ html.imdbc-off #imdbc-root { display: none !important; }
 .imdbc-season .s { font-size: var(--fs-micro); letter-spacing: .05em; text-transform: uppercase; color: var(--imdbc-faint); }
 .imdbc-season .e { font-size: var(--fs-lead); font-weight: 700; letter-spacing: -.02em; }
 .imdbc-season .e small { font-size: var(--fs-tiny); font-weight: 500; color: var(--imdbc-muted); }
+.imdbc-season .rt { font-size: var(--fs-small); font-weight: 700; font-variant-numeric: tabular-nums; }
+/* On the episode page the same figure rides on the season tab it belongs to. */
+.imdbc-btn .rt { font-weight: 700; margin-left: 5px; font-variant-numeric: tabular-nums; }
 
 /* ── reviews ───────────────────────────────────────────────────────────── */
 .imdbc-reviews { display: grid; gap: 14px; }
@@ -1642,18 +1731,37 @@ html.imdbc-off #imdbc-root { display: none !important; }
   --rb-high: #4a7f1a;
   --rb-mid: #a86a00;
   --rb-low: #b3261e;
+  /* The set for a dark ground, held for surfaces that invert - see below. */
+  --rb-top-alt: #4ade80;
+  --rb-high-alt: #a9d94b;
+  --rb-mid-alt: #f7b733;
+  --rb-low-alt: #f2695f;
 }
 html.imdbc-on.imdbc-dark {
   --rb-top: #4ade80;
   --rb-high: #a9d94b;
   --rb-mid: #f7b733;
   --rb-low: #f2695f;
+  --rb-top-alt: #1a7f37;
+  --rb-high-alt: #4a7f1a;
+  --rb-mid-alt: #a86a00;
+  --rb-low-alt: #b3261e;
 }
 .rb-top { color: var(--rb-top); }
 .rb-high { color: var(--rb-high); }
 .rb-mid { color: var(--rb-mid); }
 .rb-low { color: var(--rb-low); }
 .rb-thin { opacity: .62; }
+
+/* The selected tab inverts to the page's text colour, so a band tuned for the
+   page washes out on it - green on near-white in the dark theme, and the same
+   in reverse in the light one. One rule covers both: take the other theme's
+   set, whichever theme is running. */
+:where(#imdbc-root) .imdbc-btn.is-on .rt,
+:where(#imdbc-root) .imdbc-btn[aria-pressed="true"] .rt {
+  --rb-top: var(--rb-top-alt); --rb-high: var(--rb-high-alt);
+  --rb-mid: var(--rb-mid-alt); --rb-low: var(--rb-low-alt);
+}
 
 /* The count qualifies the score, it is not a score. Painting both with the band
    made every "6.4 4.4K" read as two ratings side by side. */
@@ -1715,17 +1823,19 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 /* Search and links on the left, IMDb's hero trailer shrunk into the empty
    right-hand side rather than given a screen of its own. */
 .imdbc-home {
-  padding: 30px 0 6px; display: grid; gap: 14px 32px; align-items: center;
+  padding: 26px 0 6px; display: grid; gap: 18px 32px; align-items: center;
   grid-template-columns: minmax(0, 1fr) minmax(0, 330px);
 }
 .imdbc-home-main { min-width: 0; max-width: 760px; }
-.imdbc-home-search { margin: 0 0 14px; display: flex; }
-.imdbc-home-search input {
-  width: 100%; padding: 14px 20px; border-radius: 999px; font: inherit;
-  font-size: var(--fs-lead); border: 1px solid var(--imdbc-border);
-  background: var(--imdbc-panel); color: var(--imdbc-text);
+/* With the duplicate search gone the left column held one thin row of chips
+   against a 16:9 panel. A grid gives the destinations the weight the space
+   was already spending on them. */
+.imdbc-home-links {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px; max-width: 560px;
 }
-.imdbc-home-links { gap: 8px; }
+.imdbc-home-links .imdbc-btn { justify-content: center; padding-block: 11px; }
+@media (max-width: 560px) { .imdbc-home-links { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* Rows scroll sideways rather than wrapping, so each section stays one card tall. */
 .imdbc-scroller {
@@ -2637,7 +2747,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   function renderTitleEpisodes(root, ent, ep) {
     const base = titleUrl(ent.id) + 'episodes/';
     const tabs = ep.seasons.map((s) => html`
-      <a class="imdbc-btn${s === ep.current ? ' is-on' : ''}" href="${base + '?season=' + encodeURIComponent(s)}">Season ${s}</a>`);
+      <a class="imdbc-btn${s === ep.current ? ' is-on' : ''}" href="${base + '?season=' + encodeURIComponent(s)}"
+         data-imdbc-season-tab="${s}">Season ${s}</a>`);
 
     root.innerHTML = interpolate(html`
       ${topBar(base)}
@@ -2669,6 +2780,29 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         </section>
       </div>`);
     wireTopBar(root);
+    wireSeasonTabs(root, ent, ep);
+  }
+
+  /**
+   * The same season ratings the title page shows, on the tabs you switch
+   * seasons with - it is the same cached fetch, so arriving here from the title
+   * page costs nothing.
+   */
+  async function wireSeasonTabs(root, ent, ep) {
+    if (ep.seasons.length < 2) return;
+    const token = renderSeq;
+    let stats;
+    try {
+      stats = await seasonStats(ent.id, ep.seasons);
+    } catch (e) {
+      warn('season stats failed', e);
+      return;
+    }
+    if (token !== renderSeq || !root.isConnected) return;
+    for (const tab of root.querySelectorAll('[data-imdbc-season-tab]')) {
+      const mark = seasonRating(stats[tab.getAttribute('data-imdbc-season-tab')]);
+      if (mark) tab.insertAdjacentHTML('beforeend', interpolate(html` ${mark}`));
+    }
   }
 
   // ── reviews ───────────────────────────────────────────────────────────────
@@ -3446,10 +3580,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       <div class="imdbc-wrap">
         <div class="imdbc-home">
           <div class="imdbc-home-main">
-            <form class="imdbc-home-search" action="${imdbUrl('/find/')}" method="get" role="search" autocomplete="off">
-              <input type="search" name="q" placeholder="Search films, shows and people"
-                     aria-label="Search IMDb" autocomplete="off" spellcheck="false" data-imdbc-home-q>
-            </form>
             <div class="imdbc-tools imdbc-home-links">
               ${HOME_LINKS.map((l) => html`<a class="imdbc-btn" href="${imdbUrl(l.path)}">${l.label}</a>`)}
             </div>
@@ -3485,7 +3615,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
     wireTopBar(root);
     wireHome(root);
-    const q = root.querySelector('[data-imdbc-home-q]');
+    // Arriving at the homepage, you are almost certainly here to look something
+    // up, so the bar's search is ready to type into.
+    const q = root.querySelector('[data-imdbc-q]');
     if (q) q.focus();
   }
 
@@ -3599,7 +3731,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${sectionHead('Seasons & episodes',
               `${num(t.episodes.seasonCount)} season${t.episodes.seasonCount === 1 ? '' : 's'} · ${num(t.episodes.total)} episode${t.episodes.total === 1 ? '' : 's'}${t.episodes.isOngoing ? ' · ongoing' : ''}`)}
             <div class="imdbc-seasons" data-imdbc-season-list>
-              <span class="imdbc-loading">Counting episodes per season…</span>
+              <span class="imdbc-loading">Reading each season’s episodes…</span>
             </div>
           </section>` : ''}
 
@@ -3985,20 +4117,24 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       host.innerHTML = interpolate(html`<span class="imdbc-empty">${num(t.episodes.total)} episodes.</span>`);
       return;
     }
-    let counts = {};
+    let stats = {};
     try {
-      counts = await memoizeDisk('seasons:' + t.id, 24 * 3600 * 1000, () => fetchSeasonCounts(t.id, seasons));
+      stats = await seasonStats(t.id, seasons);
     } catch (e) {
-      warn('season counts failed', e);
+      warn('season stats failed', e);
     }
     if (!root.isConnected) return;
 
-    const known = Object.keys(counts).length > 0;
-    host.innerHTML = seasons.map((s) => interpolate(html`
-      <a class="imdbc-season" href="${titleUrl(t.id) + 'episodes/?season=' + encodeURIComponent(s)}">
-        <div class="s">Season ${s}</div>
-        <div class="e">${known && counts[s] !== undefined ? html`${counts[s]} <small>ep</small>` : html`<small>view</small>`}</div>
-      </a>`)).join('')
+    host.innerHTML = seasons.map((s) => {
+      const stat = stats[s];
+      const count = stat && typeof stat.episodes === 'number' ? stat.episodes : null;
+      return interpolate(html`
+        <a class="imdbc-season" href="${titleUrl(t.id) + 'episodes/?season=' + encodeURIComponent(s)}">
+          <div class="s">Season ${s}</div>
+          <div class="e">${count !== null ? html`${count} <small>ep</small>` : html`<small>view</small>`}</div>
+          ${seasonRating(stat)}
+        </a>`);
+    }).join('')
       + (t.episodes.unknownSeason
         ? interpolate(html`<div class="imdbc-season"><div class="s">Unknown season</div><div class="e">${t.episodes.unknownSeason} <small>ep</small></div></div>`)
         : '');

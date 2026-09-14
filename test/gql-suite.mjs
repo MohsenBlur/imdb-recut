@@ -27,22 +27,30 @@ function sliceDecl(name) {
 const DECLS = [
   'GQL_ENDPOINT', 'GQL_HEADERS', 'CAST_FIELDS', 'PERSON_CREDIT_FIELDS', 'REVIEW_SORTS',
   'edges', 'gqlStr', 'num', 'compactNum', 'runtimeText', 'yearText', 'imgSize',
-  'gql', 'normaliseTitleCard', 'normaliseCastFromGraphql', 'normalisePersonCredit',
+  'GQL_URL_MAX', 'gql', 'normaliseTitleCard', 'normaliseCastFromGraphql', 'normalisePersonCredit',
   'normaliseReview', 'creditCategories', 'dedupeCredits',
-  'fetchFullCast', 'fetchReviews', 'fetchSeasonCounts', 'fetchAllCredits',
+  'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits',
 ];
 
-const EXPORTS = ['creditCategories', 'gql', 'fetchFullCast', 'fetchReviews', 'fetchSeasonCounts', 'fetchAllCredits', 'REVIEW_SORTS', 'GQL_HEADERS'];
+const EXPORTS = ['creditCategories', 'gql', 'fetchFullCast', 'fetchReviews', 'fetchSeasonStats', 'fetchAllCredits', 'REVIEW_SORTS', 'GQL_HEADERS', 'GQL_URL_MAX'];
 const body = DECLS.map(sliceDecl).join('\n\n');
 
 let calls = 0;
+let posts = 0;
 async function netGet(url, { headers = {} } = {}) {
   calls++;
   const r = await fetch(url, { headers });
   if (r.status < 200 || r.status >= 400) throw new Error('HTTP ' + r.status + ' from ' + url.slice(0, 110));
   return r.text();
 }
-const M_ = new Function('netGet', body + '\nreturn {' + EXPORTS.join(',') + '};')(netGet);
+async function netPost(url, data, { headers = {} } = {}) {
+  calls++;
+  posts++;
+  const r = await fetch(url, { method: 'POST', body: data, headers });
+  if (r.status < 200 || r.status >= 400) throw new Error('HTTP ' + r.status + ' from ' + url);
+  return r.text();
+}
+const M_ = new Function('netGet', 'netPost', body + '\nreturn {' + EXPORTS.join(',') + '};')(netGet, netPost);
 const M = M_;
 const M_creditCategories = M_.creditCategories;
 
@@ -90,20 +98,72 @@ console.log('\n[fetchReviews] pagination via endCursor');
   check('review text and rating decoded', !!(p1.reviews[0].text && p1.reviews[0].summary), `"${p1.reviews[0].summary}" ${p1.reviews[0].rating}/10 +${p1.reviews[0].up}`);
 }
 
-// ── per-season counts, including a very long series ───────────────────────
-console.log('\n[fetchSeasonCounts]');
+// ── per-season counts and ratings, including a very long series ─────────
+console.log('\n[fetchSeasonStats]');
 {
-  const gf = await M.fetchSeasonCounts('tt2624370', ['1', '2', '3']);
-  check('Granite Flats 9/9/9', gf['1'] === 9 && gf['2'] === 9 && gf['3'] === 9, JSON.stringify(gf));
+  const gf = await M.fetchSeasonStats('tt2624370', ['1', '2', '3']);
+  check('Granite Flats 9/9/9',
+    gf['1'].episodes === 9 && gf['2'].episodes === 9 && gf['3'].episodes === 9,
+    Object.entries(gf).map(([k, v]) => `${k}:${v.episodes}`).join(' '));
 
-  const many = Array.from({ length: 36 }, (_, i) => String(i + 1));
-  const simpsons = await M.fetchSeasonCounts('tt0096697', many);
+  // 40 seasons, not 36: at 36 the GET URL is 7,942 characters and squeaks
+  // under IMDb's 8 KB ceiling, at 40 it is 8,814 and comes back 414. The real
+  // show has 40, which is exactly how the ceiling was found - so the test uses
+  // the number that actually breaks it.
+  const many = Array.from({ length: 40 }, (_, i) => String(i + 1));
+  const before = posts;
+  const simpsons = await M.fetchSeasonStats('tt0096697', many);
   const got = Object.keys(simpsons).length;
-  const sum = Object.values(simpsons).reduce((a, b) => a + b, 0);
-  check('The Simpsons: 36 aliased seasons in one request', got === 36, `${got} seasons, ${sum} episodes total`);
+  const sum = Object.values(simpsons).reduce((a, v) => a + (v.episodes || 0), 0);
+  check('The Simpsons: 40 aliased seasons in one request', got === 40, `${got} seasons, ${sum} episodes total`);
+  check('a query too long for a URL goes out as a POST instead of 414ing',
+    posts === before + 1, `${posts - before} POSTs`);
 
-  const empty = await M.fetchSeasonCounts('tt0120737', []);
+  // IMDb publishes no season rating, so it is the mean of the season's own
+  // episodes. The Simpsons is the test case because its decline is the whole
+  // reason anyone wants the number: the early seasons must beat the late ones.
+  const mean = (n) => simpsons[String(n)] && simpsons[String(n)].rating;
+  const scored = Object.values(simpsons).filter((v) => typeof v.rating === 'number');
+  check('the seasons that have aired all carry a rating', scored.length >= 35, `${scored.length}/40`);
+  check('the mean is a 0-10 rating, not a vote count',
+    scored.every((v) => v.rating > 0 && v.rating <= 10),
+    `S1 ${mean(1).toFixed(2)} · S7 ${mean(7).toFixed(2)} · S36 ${mean(36).toFixed(2)}`);
+  check('the golden age outranks the late run by more than a rounding error',
+    mean(7) - mean(36) > 1, `S7 ${mean(7).toFixed(2)} vs S36 ${mean(36).toFixed(2)}`);
+  check('rated never exceeds the episode count',
+    scored.every((v) => v.rated <= v.episodes), JSON.stringify(simpsons['1']));
+
+  // The Simpsons has seasons listed and scheduled but not yet aired: episodes,
+  // no ratings. Those must come back with no rating at all rather than a mean
+  // of nothing - which is NaN, and NaN.toFixed(1) renders the word "NaN".
+  const unaired = Object.values(simpsons).filter((v) => v.episodes > 0 && v.rated === undefined);
+  check('a listed but unaired season has episodes and no rating',
+    unaired.length > 0 && unaired.every((v) => v.rating === undefined),
+    `${unaired.length} unaired, ${unaired.reduce((a, v) => a + v.episodes, 0)} episodes listed`);
+  check('no season reports a NaN rating',
+    Object.values(simpsons).every((v) => v.rating === undefined || Number.isFinite(v.rating)));
+  check('votes are per episode, not summed across the season',
+    simpsons['1'].votes < 100000, `S1 ${simpsons['1'].votes} votes/episode over ${simpsons['1'].rated} episodes`);
+
+  // A season can hold an episode nobody has rated - Game of Thrones S1 does -
+  // and the count has to reflect that rather than quietly averaging a zero.
+  const got8 = await M.fetchSeasonStats('tt0944947', ['1', '8']);
+  check('an unrated episode is excluded, not counted as zero',
+    got8['1'].rated <= got8['1'].episodes && got8['1'].rating > 8,
+    `S1 ${got8['1'].rated}/${got8['1'].episodes} rated, mean ${got8['1'].rating.toFixed(2)}`);
+  check('a collapse in quality shows up as a collapse in the number',
+    got8['1'].rating - got8['8'].rating > 2,
+    `S1 ${got8['1'].rating.toFixed(1)} vs S8 ${got8['8'].rating.toFixed(1)}`);
+
+  const empty = await M.fetchSeasonStats('tt0120737', []);
   check('no seasons -> no request, empty object', JSON.stringify(empty) === '{}');
+
+  // The switch has to stay on the GET side for ordinary queries: a POST is not
+  // cacheable, and every other call in this file is small.
+  const shortPosts = posts;
+  await M.gql('{ title(id: "tt0903747") { titleText { text } } }');
+  check('a short query still goes out as a GET', posts === shortPosts);
+  check(`the switch sits below IMDb's ceiling`, M.GQL_URL_MAX < 7942, `GQL_URL_MAX=${M.GQL_URL_MAX}`);
 }
 
 // ── full filmography ──────────────────────────────────────────────────────

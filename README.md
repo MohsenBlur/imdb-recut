@@ -36,9 +36,9 @@ including the homepage takeover, so it can be cut back further than the defaults
 
 | Page | What you get |
 | --- | --- |
-| `/title/tt…` | IMDb, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer · full cast with characters · sortable user reviews · seasons and per-season episode counts · photos · more-like-this · Letterboxd and Trakt links |
+| `/title/tt…` | IMDb, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer · full cast with characters · sortable user reviews · seasons with each one's episode count and rating · photos · more-like-this · Letterboxd and Trakt links |
 | `/name/nm…` | Known-for, then the *complete* filmography with the character played on every row, category tabs, filter and sort |
-| `…/ratings` `…/fullcredits` `…/episodes` `…/reviews` | Rating histogram and per-country breakdown · every cast and crew member · season tabs with stills · the full review list |
+| `…/ratings` `…/fullcredits` `…/episodes` `…/reviews` | Rating histogram and per-country breakdown · every cast and crew member · season tabs carrying their own ratings · the full review list |
 | `/find` `/search/title` | Results as rows, plus type-ahead in the header |
 | `/chart/…` `/list/ls…` | Top 250, the popularity charts, the weekend box office with each film's takings, user lists |
 | `/` | Search, quick links, IMDb's own picks, trending and popular as single-line rows, and the hero trailer shrunk into the corner — without the news, promos and ads |
@@ -56,6 +56,7 @@ from 14 votes doesn't outshout a classic. The cookie banner is hidden and
 ![A person page](docs/screenshots/person.png)
 ![Trailers and photos](docs/screenshots/media.png)
 ![Ratings breakdown](docs/screenshots/ratings.png)
+![A TV show](docs/screenshots/seasons.png)
 ![Episode list](docs/screenshots/episodes.png)
 ![Top 250](docs/screenshots/chart.png)
 ![Box office](docs/screenshots/boxoffice.png)
@@ -72,6 +73,11 @@ from 14 votes doesn't outshout a classic. The cookie banner is hidden and
    bounded to 80 entries.
 3. **Wikidata** maps the IMDb id to exact Rotten Tomatoes, Letterboxd and Trakt
    ids in one query, so nothing is matched by guessing at titles.
+
+IMDb publishes no rating for a season, so each one is the mean of its own
+episodes' ratings — every season of a show in a single request, which is what
+turns a long-running series into a curve you can read at a glance. Seasons
+listed but not yet aired show their episode count and no rating.
 
 Where-to-watch is IMDb's own data, so there's no third party and no API key —
 and since the request comes from your browser, it's already your country and

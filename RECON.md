@@ -374,3 +374,64 @@ takeover, and renders a trimmed real box-office payload end to end. Making that
 second test possible exposed a third thing: the sandbox had no `window.scrollTo`,
 which `render()` calls on every route — so *every* render in that suite had been
 failing silently, and the suite only ever asserted "did not throw".
+
+## 10. Season ratings, and the URL ceiling they hit (observed 2026-09-15)
+
+**IMDb publishes no rating for a season.** Typo-probing for the "Did you mean"
+hints (introspection is refused — see section 8) shows `EpisodeConnection`
+answers only `total` and `edges`, and `LocalizedDisplayableSeason` only
+`season`. There is nowhere for a season aggregate to live.
+
+So it is derived: the **mean of the season's own episode ratings**, one aliased
+request for every season:
+
+```
+sN: episodes(first: 250, filter: { includeSeasons: ["N"] }) {
+      total edges { node { ratingsSummary { aggregateRating voteCount } } } }
+```
+
+Measured on The Simpsons: 40 seasons, 858 episodes, **one request, 1.7s, 55 KB**.
+
+The mean is **unweighted**. Vote-weighting was measured against it across all 36
+seasons then listed and moved every one by at most 0.13 — while letting a single
+breakout episode speak for a whole season. Not worth the distortion.
+
+The thin-data test uses **votes per rated episode**, not the season's summed
+votes: `ratingClasses` asks whether a rating rests on enough data, and a sum
+would let twenty flimsy episodes pass for one well-rated one.
+
+Episodes with no rating are excluded rather than counted as zero. Game of
+Thrones season 1 lists 11 episodes and rates 10. A season can also be listed and
+scheduled with **nothing** rated — The Simpsons has three, 51 episodes between
+them — and those must yield no rating at all, since the mean of nothing is NaN
+and `NaN.toFixed(1)` renders the word "NaN" onto the page.
+
+### The 414
+
+`gql()` sent every query as a **GET with the query in the URL**, and IMDb
+enforces the usual 8 KB ceiling. Binary-searched:
+
+| seasons | query chars | URL chars | status |
+| --- | --- | --- | --- |
+| 36 | 4,920 | 7,942 | 200 |
+| 40 | 5,464 | 8,814 | **414 URI Too Long** |
+
+The first probe of this feature used 36 seasons and passed **with 250
+characters to spare**. The real show has 40. Every long-running series would
+have shown empty season tiles, and the probe that was supposed to prove the
+approach sat just inside the limit that breaks it.
+
+`gql()` now POSTs when the URL would exceed `GQL_URL_MAX` (7,000) and GETs
+otherwise — short queries stay cacheable. `test/gql-suite.mjs` asks for all 40
+seasons and asserts the request went out as a POST, so the ceiling cannot be
+re-crossed silently.
+
+Worth noting what did *not* catch this: `node --check`, the linkedom load test,
+and a 36-season live test all passed. It took rendering a real 40-season show.
+
+### One rating scale, two grounds
+
+The selected season tab inverts to the page's text colour, so a band tuned for
+the page washes out on it — bright green on near-white in the dark theme, and
+the reverse in the light one. Each theme now also carries the other theme's band
+values as `--rb-*-alt`, and one rule swaps them in on any inverted surface.
