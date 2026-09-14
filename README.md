@@ -17,6 +17,14 @@ external links that are only shown when they actually resolve.
 
 ![A film page](docs/screenshots/title.png)
 
+### Trailers and photos
+
+The trailer plays inline from IMDb's own MP4 sources - no embedded player -
+with the rest of a title's videos in a strip beneath it. Photos open in a
+keyboard-navigable lightbox.
+
+![A trailer](docs/screenshots/trailer.png)
+
 ### A person
 
 The *complete* filmography — not the 15-per-category IMDb ships in the page —
@@ -38,8 +46,8 @@ with the character played on every row, category tabs, filtering and sorting.
 
 | Page | What you get |
 | --- | --- |
-| `/title/tt…` | IMDb score, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · full cast with characters and per-actor episode counts · sortable, paginated user reviews · seasons with per-season episode counts · more-like-this · Letterboxd and Trakt links |
-| `/name/nm…` | Known-for · the complete filmography with characters, category tabs, filter and sort |
+| `/title/tt…` | IMDb score, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · trailer and video strip · full cast with characters and per-actor episode counts · sortable, paginated user reviews · seasons with per-season episode counts · photos · more-like-this · Letterboxd and Trakt links |
+| `/name/nm…` | Known-for · the complete filmography with characters, category tabs, filter and sort · videos and photos |
 | `/title/tt…/ratings` | 1–10 histogram and per-country breakdown |
 | `/title/tt…/fullcredits` | Every cast member and crew department |
 | `/title/tt…/episodes` | Season tabs, stills, air dates, ratings, plots |
@@ -78,8 +86,8 @@ On first use it asks permission to reach `api.graphql.imdb.com`,
 ## Settings
 
 Top bar → **Settings**: theme (auto/dark/light), Rotten Tomatoes lookups,
-full-cast and full-filmography loading, hiding "Self" and archive-footage
-credits, cookie-banner handling, reviews per page.
+trailers, photos, full-cast and full-filmography loading, hiding "Self" and
+archive-footage credits, cookie-banner handling, reviews per page.
 
 **Original page** in the top bar reveals IMDb's real page instantly, and a
 floating button brings the clean view back. Tampermonkey's menu has the same
@@ -144,6 +152,8 @@ changing a query.
   exist, so a link can't be validated by fetching it. The Trakt button appears
   only when Wikidata has a real id — no guessed slugs.
 - Letterboxd is films-only. Trakt covers films, series and mini-series.
+- IMDb's video playback URLs are signed and expire, so they are held in memory
+  for the life of the page and never written to the cache.
 - Signed-in features (your own ratings, watchlist) are not carried over.
 - `/name/*/bio`, `/awards` and `/user/*/ratings` are still IMDb's own pages.
 

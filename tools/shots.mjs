@@ -22,6 +22,7 @@ const SCRIPT = fs.readFileSync(path.join(ROOT, 'recut.user.js'), 'utf8');
 
 const TARGETS = [
   { name: 'title', imdbPath: '/title/tt0120737/', height: 1150, label: 'a film' },
+  { name: 'trailer', imdbPath: '/title/tt0816692/', height: 1500, label: 'a trailer and photos' },
   { name: 'person', imdbPath: '/name/nm0000276/', height: 1250, label: 'a person' },
   { name: 'ratings', imdbPath: '/title/tt0120737/ratings/', height: 1100, label: 'the ratings breakdown' },
   { name: 'episodes', imdbPath: '/title/tt0903747/episodes/', height: 1200, label: 'an episode list' },
