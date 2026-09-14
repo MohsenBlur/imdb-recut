@@ -62,12 +62,15 @@ const PRE = `
     if (/^\\/(?!\\/)/.test(s)) return 'https://www.imdb.com' + s;
     return '';
   }
+  let pageLocale = '';
+  const setLocale = (l) => { pageLocale = l; };
 `;
 
-const NAMES = ['num', 'compactNum', 'runtimeText', 'yearText', 'imgSize', 'thumb', 'titleUrl', 'nameUrl', 'initials',
+const NAMES = ['num', 'compactNum', 'runtimeText', 'yearText', 'imgSize', 'thumb', 'imdbUrl', 'titleUrl', 'nameUrl', 'initials',
   'RATING_BANDS', 'ratingBand', 'THIN_VOTES', 'ratingClasses',
   'findUrl', 'normaliseSearch', 'searchTitleRow', 'searchNameRow'];
-const EXPORTS = ['normaliseSearch', 'searchTitleRow', 'searchNameRow', 'findUrl', 'interpolate', 'thumb', 'imgSize'];
+const EXPORTS = ['normaliseSearch', 'searchTitleRow', 'searchNameRow', 'findUrl', 'interpolate', 'thumb', 'imgSize',
+  'titleUrl', 'nameUrl', 'setLocale'];
 const M = new Function(PRE + NAMES.map(sliceDecl).join('\n\n') + '\nreturn {' + EXPORTS.join(',') + '};')();
 
 let fails = 0;
@@ -169,6 +172,18 @@ console.log('\n[findUrl]');
 check('encodes the query', M.findUrl('lord of the rings', '') === 'https://www.imdb.com/find/?q=lord%20of%20the%20rings', M.findUrl('lord of the rings', ''));
 check('adds the section', M.findUrl('x', 'tt').endsWith('&s=tt'));
 check('ampersand in the query is encoded', M.findUrl('fast & furious', '').includes('%26'), M.findUrl('fast & furious', ''));
+
+console.log('\n[locale] IMDb serves /de/, /es/ ... and links must stay in that language');
+{
+  M.setLocale('');
+  check('no prefix by default', M.titleUrl('tt1') === 'https://www.imdb.com/title/tt1/', M.titleUrl('tt1'));
+  M.setLocale('/de');
+  check('title links keep the prefix', M.titleUrl('tt1') === 'https://www.imdb.com/de/title/tt1/', M.titleUrl('tt1'));
+  check('name links keep the prefix', M.nameUrl('nm1') === 'https://www.imdb.com/de/name/nm1/', M.nameUrl('nm1'));
+  check('search keeps the prefix', M.findUrl('x', '') === 'https://www.imdb.com/de/find/?q=x', M.findUrl('x', ''));
+  check('and the section still appends', M.findUrl('x', 'tt').endsWith('&s=tt'), M.findUrl('x', 'tt'));
+  M.setLocale('');
+}
 
 console.log('\n[empty payload]');
 const empty = M.normaliseSearch({}, { query: 'zzz', section: 'tt' });

@@ -47,7 +47,7 @@ with the character played on every row, category tabs, filtering and sorting.
 
 | Page | What you get |
 | --- | --- |
-| `/title/tt…` | IMDb score, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · trailer and video strip · full cast with characters and per-actor episode counts · sortable, paginated user reviews · seasons with per-season episode counts · photos · more-like-this · Letterboxd and Trakt links |
+| `/title/tt…` | IMDb score, Metascore, Tomatometer, Popcornmeter and Letterboxd in one strip · where to watch in your country · trailer and video strip · full cast with characters and per-actor episode counts · sortable, paginated user reviews · seasons with per-season episode counts · photos · more-like-this · Letterboxd and Trakt links |
 | `/name/nm…` | Known-for · the complete filmography with characters, category tabs, filter and sort · videos and photos |
 | `/title/tt…/ratings` | 1–10 histogram and per-country breakdown |
 | `/title/tt…/fullcredits` | Every cast member and crew department |
@@ -60,6 +60,15 @@ Every rating on every page is colour-banded on one scale — **≥8.0 green ·
 7.0–7.9 lime · 6.0–6.9 amber · below 6.0 red** — so a filmography can be skimmed
 without reading numbers. Ratings from fewer than 1,000 votes are dimmed, so an
 obscure 9.8 from 14 votes doesn't outshout a classic.
+
+**Where to watch** comes from IMDb's own watch options, so there is no third
+party, no API key and no attribution requirement - and because the request is
+made from your browser, IMDb geolocates it to *your* country, with prices in
+your currency.
+
+IMDb serves language-prefixed paths for non-English users (`/de/title/…`,
+`/es/name/…`). Those are recognised, and every link the script builds keeps the
+prefix so you stay in your own language.
 
 The cookie consent banner is hidden and **declined** on every IMDb page, not
 just the ones that get rewritten.
@@ -87,8 +96,11 @@ On first use it asks permission to reach `api.graphql.imdb.com`,
 ## Settings
 
 Top bar → **Settings**: theme (auto/dark/light), Rotten Tomatoes lookups,
-trailers, photos, full-cast and full-filmography loading, hiding "Self" and
-archive-footage credits, cookie-banner handling, reviews per page.
+where-to-watch, trailers, photos, full-cast and full-filmography loading, hiding
+"Self" and archive-footage credits, cookie-banner handling, reviews per page.
+
+Everything that puts something on screen has a toggle, so the layout can be cut
+back further than the defaults.
 
 **Original page** in the top bar reveals IMDb's real page instantly, and a
 floating button brings the clean view back. Tampermonkey's menu has the same
@@ -156,6 +168,8 @@ changing a query.
 - IMDb's video playback URLs are signed and expire, so they are held in memory
   for the life of the page and never written to the cache.
 - Signed-in features (your own ratings, watchlist) are not carried over.
+- On a language-prefixed page the layout follows your language, but titles
+  fetched from the API come back in English, so a filmography can mix the two.
 - `/name/*/bio`, `/awards` and `/user/*/ratings` are still IMDb's own pages.
 
 ## Licence

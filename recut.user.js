@@ -1,9 +1,15 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.6.0
+// @version      2.7.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
+// @license      MIT
+// @homepageURL  https://github.com/MohsenBlur/imdb-recut
+// @supportURL   https://github.com/MohsenBlur/imdb-recut/issues
+// @downloadURL  https://github.com/MohsenBlur/imdb-recut/raw/main/recut.user.js
+// @updateURL    https://github.com/MohsenBlur/imdb-recut/raw/main/recut.user.js
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=imdb.com
 // @match        https://www.imdb.com/*
 // @match        https://imdb.com/*
 // @match        https://m.imdb.com/*
@@ -39,7 +45,22 @@
    * (/fullcredits, /reviews, /episodes, /bio ...) are left completely alone so
    * there is always an untouched IMDb one click away.
    */
-  function routeFor(pathname, search) {
+  // IMDb prefixes paths with a language code for non-English users
+  // (/de/title/tt…, /es/name/nm…). No IMDb route is two letters long, so this
+  // is unambiguous. The prefix is remembered and put back on every link the
+  // script builds, so the user stays in their own language.
+  let pageLocale = '';
+
+  function splitLocale(pathname) {
+    const m = /^\/([a-z]{2}(?:-[a-z]{2})?)(?=\/)/.exec(pathname || '');
+    if (!m) return { locale: '', path: pathname || '' };
+    return { locale: '/' + m[1], path: pathname.slice(m[0].length) };
+  }
+
+  function routeFor(fullPath, search) {
+    const split = splitLocale(fullPath);
+    const pathname = split.path;
+    pageLocale = split.locale;
     let m = /^\/title\/(tt\d+)\/?$/.exec(pathname);
     if (m) return { kind: 'title', id: m[1] };
     m = /^\/name\/(nm\d+)\/?$/.exec(pathname);
@@ -86,6 +107,7 @@
     fullCredits: { def: true, label: 'Load the complete filmography' },
     hideSelfCredits: { def: true, label: 'Hide "Self" and archive-footage credits by default' },
     declineCookies: { def: true, label: 'Hide and decline the cookie banner' },
+    watchOptions: { def: true, label: 'Show where to watch' },
     trailers: { def: true, label: 'Show trailers and videos' },
     photos: { def: true, label: 'Show photos' },
     reviewCount: { def: 10, label: 'User reviews per page' }
@@ -132,7 +154,7 @@
     if (!u) return '';
     const s = String(u).trim();
     if (/^https?:\/\//i.test(s)) return s;
-    if (/^\/(?!\/)/.test(s)) return 'https://www.imdb.com' + s;
+    if (/^\/(?!\/)/.test(s)) return 'https://www.imdb.com' + s;   // already absolute-path
     return '';
   }
 
@@ -262,8 +284,9 @@
     return w > 0 && h > 0 ? { width: w, height: h } : null;
   }
 
-  const titleUrl = (id) => `https://www.imdb.com/title/${encodeURIComponent(id)}/`;
-  const nameUrl = (id) => `https://www.imdb.com/name/${encodeURIComponent(id)}/`;
+  const imdbUrl = (path) => `https://www.imdb.com${pageLocale}${path}`;
+  const titleUrl = (id) => imdbUrl(`/title/${encodeURIComponent(id)}/`);
+  const nameUrl = (id) => imdbUrl(`/name/${encodeURIComponent(id)}/`);
 
   // ══════════════════════════════════════════════════════════════════════════
   // 4. Network — everything external goes through GM_xmlhttpRequest so page CSP
@@ -490,9 +513,7 @@
   async function fetchPageProps(route) {
     const url = route.kind === 'search' ? findUrl(route.query, route.section)
       : route.sub ? titleUrl(route.id) + route.sub + '/' + (route.season ? '?season=' + encodeURIComponent(route.season) : '')
-      : route.kind === 'chart' ? 'https://www.imdb.com/chart/' + encodeURIComponent(route.id) + '/'
-      : route.kind === 'list' ? 'https://www.imdb.com/list/' + encodeURIComponent(route.id) + '/'
-      : route.kind === 'titleSearch' ? 'https://www.imdb.com/search/title/' + (route.query || '')
+      : (route.kind === 'chart' || route.kind === 'list' || route.kind === 'titleSearch') ? listPageUrl(route)
       : route.kind === 'title' ? titleUrl(route.id) : nameUrl(route.id);
     const text = await netGet(url, { headers: { Accept: 'text/html' } });
     const doc = new DOMParser().parseFromString(text, 'text/html');
@@ -1212,6 +1233,7 @@
   // a real id — no guessed slug, and no search-page fallback, because Cloudflare
   // blocks automated checks and an unverified fallback would be a guess.
   const TRAKT_UNSUPPORTED = /^(videoGame|podcastSeries|podcastEpisode|musicVideo)$/;
+  const WATCH_UNSUPPORTED = /^(videoGame|podcastSeries|podcastEpisode)$/;
 
   async function traktUrl(imdbId, typeId) {
     if (TRAKT_UNSUPPORTED.test(typeId || '')) return null;
@@ -1624,6 +1646,23 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-ext { display: inline-flex; align-items: center; gap: 9px; padding: 8px 14px; }
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
 
+/* ── where to watch ────────────────────────────────────────────────────── */
+.imdbc-watchrow:empty { display: none; }
+.imdbc-watchrow { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; align-items: center; }
+.imdbc-watch-group { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.imdbc-watch-group .k {
+  font-size: var(--fs-micro); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--imdbc-faint); font-weight: 650;
+}
+.imdbc-watch {
+  display: inline-flex; align-items: baseline; gap: 7px; padding: 5px 11px;
+  border: 1px solid var(--imdbc-border); border-radius: 999px; background: var(--imdbc-panel);
+  font-size: var(--fs-small);
+}
+.imdbc-watch:hover { background: var(--imdbc-panel-2); text-decoration: none; border-color: var(--imdbc-muted); }
+.imdbc-watch b { font-weight: 600; }
+.imdbc-watch small { color: var(--imdbc-faint); font-size: var(--fs-tiny); }
+
 /* ── media chips and the panel they open ───────────────────────────────── */
 .imdbc-media-btns { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .imdbc-tpreview {
@@ -1988,7 +2027,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       <div class="imdbc-bar">
         <div class="imdbc-bar-in">
           <div class="imdbc-brand"><a href="https://www.imdb.com/">Re<b>cut</b></a></div>
-          <form action="https://www.imdb.com/find/" method="get" role="search" autocomplete="off">
+          <form action="${imdbUrl('/find/')}" method="get" role="search" autocomplete="off">
             <div class="imdbc-search">
               <input type="search" name="q" placeholder="Search IMDb" aria-label="Search IMDb"
                      autocomplete="off" spellcheck="false" value="${prefill || ''}"
@@ -2106,7 +2145,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   // 12b. Search results
   // ══════════════════════════════════════════════════════════════════════════
 
-  const findUrl = (q, section) => 'https://www.imdb.com/find/?q=' + encodeURIComponent(q)
+  const findUrl = (q, section) => imdbUrl('/find/') + '?q=' + encodeURIComponent(q)
     + (section ? '&s=' + encodeURIComponent(section) : '');
 
   /**
@@ -2643,9 +2682,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   }
 
   function listPageUrl(route) {
-    if (route.kind === 'chart') return 'https://www.imdb.com/chart/' + encodeURIComponent(route.id) + '/';
-    if (route.kind === 'list') return 'https://www.imdb.com/list/' + encodeURIComponent(route.id) + '/';
-    return 'https://www.imdb.com/search/title/' + (route.query || '');
+    if (route.kind === 'chart') return imdbUrl('/chart/' + encodeURIComponent(route.id) + '/');
+    if (route.kind === 'list') return imdbUrl('/list/' + encodeURIComponent(route.id) + '/');
+    return imdbUrl('/search/title/') + (route.query || '');
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2738,6 +2777,67 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
    * lightbox without ever occupying page space.
    */
   /** The preview tucks under the poster, using space that was otherwise dead. */
+  // ── Where to watch ────────────────────────────────────────────────────────
+  // IMDb's own watch options, which means no third-party service, no API key
+  // and no attribution requirement. IMDb geolocates from the caller's IP, and
+  // the call is made from the user's browser, so the providers and the prices
+  // are already the user's own country and currency. That also means the result
+  // must never be written to the disk cache: it would be wrong the moment the
+  // user travelled or switched a VPN on.
+  const WATCH_CATEGORY_LABEL = { STREAMING: 'Stream', 'RENT/BUY': 'Rent or buy', FREE: 'Free', THEATER: 'In cinemas' };
+
+  function fetchWatchOptions(titleId) {
+    return memoize('watch:' + titleId, 30 * 60 * 1000, async () => {
+      const data = await gql(`{ title(id: ${gqlStr(titleId)}) {
+        watchOptionsByCategory(limit: 12) {
+          categorizedWatchOptionsList {
+            categoryName { value }
+            watchOptions { provider { id name { value } } description { value } link(platform: WEB) }
+          }
+        }
+      } }`);
+      const list = (data && data.title && data.title.watchOptionsByCategory
+        && data.title.watchOptionsByCategory.categorizedWatchOptionsList) || [];
+      return list.map((c) => ({
+        category: (c.categoryName && c.categoryName.value) || '',
+        options: (c.watchOptions || []).map((o) => ({
+          name: (o.provider && o.provider.name && o.provider.name.value) || '',
+          note: (o.description && o.description.value) || '',
+          link: o.link || ''
+        })).filter((o) => o.name && o.link)
+      })).filter((c) => c.options.length);
+    });
+  }
+
+  function watchHtml(groups) {
+    if (!groups || !groups.length) return '';
+    return groups.map((g) => interpolate(html`
+      <span class="imdbc-watch-group">
+        <span class="k">${WATCH_CATEGORY_LABEL[g.category] || g.category}</span>
+        ${g.options.map((o) => html`
+          <a class="imdbc-watch" href="${safeUrl(o.link)}" target="_blank" rel="noopener noreferrer"
+             title="${o.name}${o.note ? ' — ' + o.note : ''}">
+            <b>${o.name}</b>${o.note ? html`<small>${o.note}</small>` : ''}
+          </a>`)}
+      </span>`)).join('');
+  }
+
+  async function wireWatchOptions(root, t) {
+    if (!settings.watchOptions) return;
+    const host = root.querySelector('[data-imdbc-watch]');
+    if (!host || WATCH_UNSUPPORTED.test(t.typeId || '')) return;
+    const token = renderSeq;
+    let groups = null;
+    try {
+      groups = await fetchWatchOptions(t.id);
+    } catch (e) {
+      warn('watch options failed', e);
+      return;                       // silence beats an error where nothing was promised
+    }
+    if (token !== renderSeq || !root.isConnected) return;
+    host.innerHTML = watchHtml(groups);
+  }
+
   function trailerPreview(m) {
     if (!(settings.trailers && m.trailer && bestSource(m.trailer))) return '';
     return interpolate(html`
@@ -3022,6 +3122,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${t.genres.length ? html`<div class="imdbc-chips">${t.genres.map((g) => html`<span class="imdbc-chip">${g}</span>`)}</div>` : ''}
             ${t.plot ? html`<p class="imdbc-plot">${t.plot}</p>` : ''}
             <div class="imdbc-scores" data-imdbc-scores>${raw(scoreStrip(t))}</div>
+            <div class="imdbc-watchrow" data-imdbc-watch></div>
             <div class="imdbc-actions" data-imdbc-actions>${raw(actionsHtml(t))}</div>
             <div class="imdbc-mediapanel" data-imdbc-mediapanel></div>
             ${crewLines.length ? html`<div class="imdbc-crew">${crewLines}</div>` : ''}
@@ -3072,6 +3173,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
     wireTopBar(root);
     wireExternalLinks(root, t);
+    wireWatchOptions(root, t);
     wireMedia(root, t);
     wireTitleCast(root, t);
     wireTitleReviews(root, t);
@@ -3796,7 +3898,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           ${SETTING_DEFS.theme.options.map((o) => html`<option value="${o}"${settings.theme === o ? raw(' selected') : ''}>${o}</option>`)}
         </select>
       </div>
-      ${['rottenTomatoes', 'trailers', 'photos', 'fullCast', 'fullCredits', 'hideSelfCredits', 'declineCookies'].map((k) => html`
+      ${['rottenTomatoes', 'watchOptions', 'trailers', 'photos', 'fullCast', 'fullCredits', 'hideSelfCredits', 'declineCookies'].map((k) => html`
         <div class="imdbc-set-row">
           <label for="imdbc-set-${k}">${SETTING_DEFS[k].label}</label>
           <input id="imdbc-set-${k}" type="checkbox" data-set="${k}"${settings[k] ? raw(' checked') : ''}>
