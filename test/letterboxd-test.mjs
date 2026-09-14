@@ -52,7 +52,7 @@ const PRE = `
   }
   // This suite is about the Letterboxd button; the media chips that share the
   // same row have their own coverage.
-  const mediaChips = () => '';
+  const mediaButtons = () => '';
 `;
 
 const NAMES = ['MARKS', 'LETTERBOXD_TYPES', 'letterboxdRedirect', 'actionsHtml'];

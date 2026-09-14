@@ -97,5 +97,19 @@ console.log('\n[cache] the store stays bounded and versioned');
   check('nothing is written to the store just by loading', keys.length === 0, keys.slice(0, 3).join(', '));
 }
 
+console.log('\n[overlays] the takeover must not hide its own overlays');
+{
+  // The takeover hides every direct child of <body> that is not its root. The
+  // lightbox was appended to <body>, so it was created display:none - present
+  // in the DOM but invisible. Both halves of the fix are asserted, because
+  // checking only that the element EXISTS is exactly what missed it.
+  const hideRule = SRC.split(String.fromCharCode(10)).find((l) => l.startsWith('html.imdbc-on body >')) || '';
+  check('the body-hiding rule is present', !!hideRule, hideRule.slice(0, 60));
+  check('it exempts the lightbox', hideRule.includes(':not(#imdbc-lightbox)'), hideRule.slice(0, 120));
+  const appendLine = (SRC.split(String.fromCharCode(10)).find((l) => l.includes('appendChild(box)')) || '').trim();
+  check('the lightbox is appended inside the root, not the body',
+    /imdbc-root/.test(appendLine), appendLine.slice(0, 80));
+}
+
 console.log(`\n${fails === 0 ? 'ALL PASSED' : fails + ' FAILED'}`);
 process.exit(fails ? 1 : 0);

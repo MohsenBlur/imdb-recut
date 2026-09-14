@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.5.0
+// @version      2.6.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @match        https://www.imdb.com/*
@@ -1234,7 +1234,7 @@
    * upgrades the href, or removes the button when Letterboxd has no page.
    */
   function actionsHtml(t) {
-    const parts = [mediaChips(t)].filter(Boolean);
+    const parts = [mediaButtons(t)].filter(Boolean);
     if (LETTERBOXD_TYPES.test(t.typeId) && t.lbx !== null) {
       const href = (t.lbx && safeUrl(t.lbx.url)) || letterboxdRedirect(t.id);
       parts.push(interpolate(html`
@@ -1340,7 +1340,7 @@ html.imdbc-on body {
   margin: 0 !important;
   padding: 0 !important;
 }
-html.imdbc-on body > *:not(#imdbc-root):not(script):not(style):not(link) { display: none !important; }
+html.imdbc-on body > *:not(#imdbc-root):not(#imdbc-lightbox):not(#imdbc-restore):not(script):not(style):not(link) { display: none !important; }
 html.imdbc-on #imdbc-root { display: block; }
 html.imdbc-off #imdbc-root { display: none !important; }
 
@@ -1627,8 +1627,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 /* ── media chips and the panel they open ───────────────────────────────── */
 .imdbc-media-btns { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .imdbc-tpreview {
-  position: relative; width: 168px; aspect-ratio: 16 / 9; padding: 0; flex: 0 0 auto;
-  border: 1px solid var(--imdbc-border); border-radius: 9px; overflow: hidden;
+  position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; margin-top: 10px;
+  padding: 0; border: 1px solid var(--imdbc-border); border-radius: 9px; overflow: hidden;
   background: var(--imdbc-panel-2); cursor: pointer;
 }
 .imdbc-tpreview img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -2737,21 +2737,23 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
    * asked for: the player is built on click, and photos go straight to the
    * lightbox without ever occupying page space.
    */
-  function mediaChips(m) {
-    const hasTrailer = settings.trailers && m.trailer && bestSource(m.trailer);
-    const hasVideos = settings.trailers && m.videos && m.videos.length > 1;
-    const hasPhotos = settings.photos && m.images && m.images.length;
-    if (!hasTrailer && !hasVideos && !hasPhotos) return '';
-
-    const preview = hasTrailer ? interpolate(html`
+  /** The preview tucks under the poster, using space that was otherwise dead. */
+  function trailerPreview(m) {
+    if (!(settings.trailers && m.trailer && bestSource(m.trailer))) return '';
+    return interpolate(html`
       <button type="button" class="imdbc-tpreview" data-imdbc-trailer aria-expanded="false"
               title="${m.trailer.name}">
         ${thumb(m.trailer.thumb, 240, 135, m.trailer.thumbSize)
           ? html`<img src="${thumb(m.trailer.thumb, 240, 135, m.trailer.thumbSize)}" alt="" loading="lazy" decoding="async">` : ''}
         <span class="play" aria-hidden="true"></span>
         <span class="lbl">Trailer${m.trailer.seconds ? html` · ${videoTime(m.trailer.seconds)}` : ''}</span>
-      </button>`) : '';
+      </button>`);
+  }
 
+  /** The gallery entry points ride along in the existing actions row. */
+  function mediaButtons(m) {
+    const hasVideos = settings.trailers && m.videos && m.videos.length > 1;
+    const hasPhotos = settings.photos && m.images && m.images.length;
     const buttons = [];
     if (hasVideos) {
       buttons.push(interpolate(html`
@@ -2765,7 +2767,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           <span class="ic pic" aria-hidden="true"></span>${compactNum(m.imageTotal || m.images.length)} photos
         </button>`));
     }
-    return preview + (buttons.length ? interpolate(html`<span class="imdbc-media-btns">${raw(buttons.join(''))}</span>`) : '');
+    return buttons.join('');
   }
 
   function playInline(host, video) {
@@ -2909,7 +2911,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     document.addEventListener('keydown', box.__keys);
 
     paint();
-    document.body.appendChild(box);
+    // Inside the root, so the takeover's body-child rule cannot hide it. It is
+    // position:fixed, so nesting costs nothing.
+    (document.getElementById('imdbc-root') || document.body).appendChild(box);
     box.focus();
   }
 
@@ -3007,6 +3011,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             <div class="imdbc-hero-poster">
               ${heroPoster ? html`<img src="${heroPoster}" alt="Poster for ${t.title}" decoding="async">` : ''}
             </div>
+            ${raw(trailerPreview(t))}
           </div>
           <div>
             <h1 class="imdbc-h1">${t.title}</h1>
@@ -3458,15 +3463,18 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             <div class="imdbc-hero-poster">
               ${photo ? html`<img src="${photo}" alt="Photo of ${p.name}" decoding="async">` : ''}
             </div>
+            ${raw(trailerPreview(p))}
           </div>
           <div>
             <h1 class="imdbc-h1">${p.name}</h1>
             ${p.professions.length ? html`<div class="imdbc-sub">${raw(p.professions.map(esc).join('<span class="dot">·</span>'))}</div>` : ''}
             ${lifeLines.length ? html`<div class="imdbc-crew">${raw(lifeLines.join(''))}</div>` : ''}
-            ${p.bio ? html`
-              <p class="imdbc-bio clamped" data-imdbc-bio>${p.bio}</p>
-              <button type="button" class="imdbc-btn imdbc-btn-ghost" data-imdbc-bio-toggle>Read full bio</button>` : ''}
-            ${mediaChips(p) ? html`<div class="imdbc-actions">${raw(mediaChips(p))}</div>` : ''}
+            ${p.bio ? html`<p class="imdbc-bio clamped" data-imdbc-bio>${p.bio}</p>` : ''}
+            ${(p.bio || mediaButtons(p)) ? html`
+              <div class="imdbc-actions">
+                ${p.bio ? html`<button type="button" class="imdbc-btn imdbc-btn-ghost" data-imdbc-bio-toggle>Read full bio</button>` : ''}
+                ${raw(mediaButtons(p))}
+              </div>` : ''}
             <div class="imdbc-mediapanel" data-imdbc-mediapanel></div>
           </div>
         </div>
