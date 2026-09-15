@@ -170,7 +170,7 @@ console.log('\n[boxoffice] the takings chart has its own payload shape');
   check('it renders rows, not the failure card', !/could not read/i.test(text));
   check('both releases are listed', text.includes('Practical Magic 2') && text.includes('Spider-Man: Brand New Day'));
   check('the weekend take is shown', text.includes('$30M this weekend'));
-  check('a running total is shown when it differs', text.includes('$935M total'));
+  check('a running total is shown when it differs', text.includes('$935M to date'));
   check('the first week is not called "week 1"', text.includes('first week') && !/week 1\b/.test(text));
   check('the date window is spelled out', text.includes('11 Sep 2026'));
 }

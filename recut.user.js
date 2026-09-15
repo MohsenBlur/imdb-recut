@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.12.0
+// @version      2.12.1
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -3020,7 +3020,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         const window = [grossing.timeWindowStartDate, grossing.timeWindowEndDate].filter(Boolean);
         return {
           heading: CHARTS[route.id] || 'Chart',
-          subtitle: window.length === 2 ? `Weekend of ${dayText(window[0])} – ${dayText(window[1])}` : '',
+          subtitle: window.length === 2 ? `US · weekend of ${dayText(window[0])} – ${dayText(window[1])}` : 'US',
           items: (grossing.edges || []).map((e, i) => {
             const node = (e && e.node) || {};
             const t = normaliseTitleCard((node.release && node.release.titles && node.release.titles[0]) || null);
@@ -3031,7 +3031,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             const weeks = node.release && node.release.weeksRunning;
             t.note = [
               weekend ? weekend + ' this weekend' : '',
-              lifetime && lifetime !== weekend ? lifetime + ' total' : '',
+              lifetime && lifetime !== weekend ? lifetime + ' to date' : '',
               weeks ? (weeks === 1 ? 'first week' : `week ${weeks}`) : ''
             ].filter(Boolean).join(' · ');
             return t;
@@ -3482,23 +3482,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     { path: '/search/title/?title_type=feature&sort=user_rating,desc&num_votes=25000,', label: 'Advanced search' }
   ];
 
-  function normaliseHome(pp) {
-    const data = (pp.pageQueryData && pp.pageQueryData.data) || {};
-    const chart = data.boxOfficeWeekendChart || {};
-    const money = moneyText;
-    return {
-      weekend: (chart.entries || []).map((e) => ({
-        id: e.title && e.title.id,
-        title: (e.title && e.title.titleText && e.title.titleText.text) || '',
-        typeText: (e.title && e.title.titleType && e.title.titleType.text) || '',
-        typeId: (e.title && e.title.titleType && e.title.titleType.id) || '',
-        gross: money(e.weekendGross),
-        lifetime: money(e.title && e.title.lifetimeGross),
-        cinemas: (e.title && e.title.cinemas && e.title.cinemas.total) || 0
-      })).filter((e) => e.id && e.title)
-    };
-  }
-
   // What people actually open imdb.com for. IMDb builds these client-side, so
   // they are fetched directly — one aliased query for all three rows.
   const HOME_CARD_FIELDS = `
@@ -3515,16 +3498,37 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   const fromEdges = (c) => edges(c).map(normaliseTitleCard).filter(Boolean);
 
   function fetchHomeRows() {
-    return memoizeDisk('home:rows', 60 * 60 * 1000, async () => {
+    // v2: the cached value gained a boxOffice branch. A stale one degrades to
+    // no section rather than an error, but a shape change gets a new key.
+    return memoizeDisk('home:rows:v2', 60 * 60 * 1000, async () => {
       const data = await gql(`{
         trending: trendingTitles(limit: 14) { titles { ${HOME_CARD_FIELDS} } }
         popMovies: chartTitles(first: 14, chart: { chartType: MOST_POPULAR_MOVIES }) { edges { node { ${HOME_CARD_FIELDS} } } }
         popTv: chartTitles(first: 14, chart: { chartType: MOST_POPULAR_TV_SHOWS }) { edges { node { ${HOME_CARD_FIELDS} } } }
+        boxOffice: boxOfficeWeekendChart(limit: 10) {
+          weekendStartDate weekendEndDate
+          entries {
+            weekendGross { total { amount currency } }
+            title { ${HOME_CARD_FIELDS} lifetimeGross(boxOfficeArea: DOMESTIC) { total { amount currency } } }
+          }
+        }
       }`);
+      const chart = (data && data.boxOffice) || {};
       return {
         trending: ((data && data.trending && data.trending.titles) || []).map(normaliseTitleCard).filter(Boolean),
         popMovies: fromEdges(data && data.popMovies),
-        popTv: fromEdges(data && data.popTv)
+        popTv: fromEdges(data && data.popTv),
+        boxOffice: {
+          from: chart.weekendStartDate || '',
+          to: chart.weekendEndDate || '',
+          entries: (chart.entries || []).map((e) => {
+            const t = normaliseTitleCard(e && e.title);
+            if (!t) return null;
+            t.gross = moneyText(e.weekendGross);
+            t.lifetime = moneyText(e.title && e.title.lifetimeGross);
+            return t;
+          }).filter(Boolean)
+        }
       };
     });
   }
@@ -3611,7 +3615,44 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           ${sectionHead(label, '', r.more ? html`<a class="imdbc-btn" href="${imdbUrl(r.more)}">See all</a>` : '')}
           <div class="imdbc-cards imdbc-scroller">${items.map(titleCard)}</div>
         </section>`);
-    }).join('');
+    }).join('') + boxOfficeSection(rows && rows.boxOffice);
+  }
+
+  /**
+   * The weekend takings. This used to be read out of the homepage payload, the
+   * one part of it that carried real content - but IMDb has since stopped
+   * shipping it (the payload is down to `news`), and the row's poster box was
+   * being rendered empty because nothing ever filled it. Fetched now, with the
+   * poster, the rating and the worldwide total.
+   */
+  function boxOfficeSection(box) {
+    if (!box || !box.entries.length) return '';
+    const window = [box.from, box.to].filter(Boolean);
+    return interpolate(html`
+      <section class="imdbc-sec">
+        ${sectionHead('Box office this weekend',
+          window.length === 2 ? `US · ${dayText(window[0])} – ${dayText(window[1])}` : 'US',
+          html`<a class="imdbc-btn" href="${imdbUrl('/chart/boxoffice/')}">See all</a>`)}
+        <div class="imdbc-results">
+          ${box.entries.map((t, i) => html`
+            <a class="imdbc-result ranked" href="${titleUrl(t.id)}">
+              <span class="rank">${i + 1}</span>
+              <span class="po">${thumb(t.poster, 96, 144, t.posterSize)
+                ? html`<img src="${thumb(t.poster, 96, 144, t.posterSize)}" alt="" loading="lazy" decoding="async">` : ''}</span>
+              <span class="main">
+                <span class="ti">${t.title}</span>
+                <span class="mt">
+                  ${[t.year, typeLabel(t), t.runtime, t.certificate].filter(Boolean).length
+                    ? html`<span>${[t.year, typeLabel(t), t.runtime, t.certificate].filter(Boolean).join(' · ')}</span>` : ''}
+                  ${typeof t.rating === 'number'
+                    ? html`<span class="rt ${ratingClasses(t.rating, 10, t.votes)}">★ ${t.rating.toFixed(1)}<small> ${compactNum(t.votes)}</small></span>` : ''}
+                  <span class="note">${[t.gross ? t.gross + ' this weekend' : '',
+                    t.lifetime && t.lifetime !== t.gross ? t.lifetime + ' to date' : ''].filter(Boolean).join(' · ')}</span>
+                </span>
+              </span>
+            </a>`)}
+        </div>
+      </section>`);
   }
 
   /**
@@ -3640,7 +3681,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         ${total > 1 ? nav(-1, 'Previous trailer', '\u2039') : ''}
         <span class="tx">
           <a class="ti" href="${v.titleId ? titleUrl(v.titleId) : '#'}">${v.title || v.name}</a>
-          <span class="sub">${v.name}${v.seconds ? html` \u00b7 ${videoTime(v.seconds)}` : ''}${total > 1 ? html` \u00b7 ${index + 1}/${total}` : ''}</span>
+          <span class="sub">${v.name}${v.seconds ? html` · ${videoTime(v.seconds)}` : ''}${total > 1 ? html` · ${index + 1}/${total}` : ''}</span>
         </span>
         ${total > 1 ? nav(1, 'Next trailer', '\u203a') : ''}
       </div>`;
@@ -3695,7 +3736,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     });
   }
 
-  function renderHome(root, home) {
+  function renderHome(root) {
     root.innerHTML = interpolate(html`
       ${topBar(imdbUrl('/'))}
       <div class="imdbc-wrap">
@@ -3711,27 +3752,6 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
         <div data-imdbc-home-rows>
           <p class="imdbc-loading" style="margin-top:28px">Loading what's popular</p>
         </div>
-
-        ${home.weekend.length ? html`
-          <section class="imdbc-sec">
-            ${sectionHead('Box office this weekend', '')}
-            <div class="imdbc-results">
-              ${home.weekend.map((e, i) => html`
-                <a class="imdbc-result ranked" href="${titleUrl(e.id)}">
-                  <span class="rank">${i + 1}</span>
-                  <span class="po"></span>
-                  <span class="main">
-                    <span class="ti">${e.title}</span>
-                    <span class="mt">
-                      ${typeLabel(e) ? html`<span>${typeLabel(e)}</span>` : ''}
-                      ${e.gross ? html`<span><b>${e.gross}</b> this weekend</span>` : ''}
-                      ${e.lifetime ? html`<span>${e.lifetime} total</span>` : ''}
-                      ${e.cinemas ? html`<span>${num(e.cinemas)} cinemas</span>` : ''}
-                    </span>
-                  </span>
-                </a>`)}
-            </div>
-          </section>` : ''}
       </div>`);
 
     wireTopBar(root);
@@ -3805,7 +3825,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     }
     box.innerHTML = interpolate(html`<div class="panel">
       <div class="head">
-        <span><b>${roles.name}</b> <span class="imdbc-note">\u00b7 ${num(roles.characters.length)} part${roles.characters.length === 1 ? '' : 's'}</span></span>
+        <span><b>${roles.name}</b> <span class="imdbc-note">· ${num(roles.characters.length)} part${roles.characters.length === 1 ? '' : 's'}</span></span>
         <button type="button" class="imdbc-btn imdbc-btn-ghost" data-imdbc-roles-close>Close</button>
       </div>
       <div class="list">${roles.characters.map((c) => html`<span>${c}</span>`)}</div>
@@ -4837,7 +4857,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
     try {
       const pp = await getPageProps(route);
       if (seq !== renderSeq) return;
-      if (route.kind === 'home') renderHome(root, normaliseHome(pp));
+      if (route.kind === 'home') renderHome(root);
       else if (route.kind === 'title') renderTitle(root, normaliseTitle(pp));
       else if (route.kind === 'search') renderSearch(root, normaliseSearch(pp, route));
       else if (route.kind === 'titleRatings') renderTitleRatings(root, normaliseEntity(pp), normaliseRatings(pp));

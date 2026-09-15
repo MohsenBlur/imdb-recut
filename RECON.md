@@ -521,3 +521,48 @@ The overlay is appended into `#imdbc-root`, not `<body>` - the same trap the
 photo lightbox fell into, where the takeover's own body-hiding rule creates the
 element `display:none`. `load-test.mjs` asserts the append target, all three
 dismissals, and that the affordance is outside the clamp.
+
+## 12. The homepage box office (observed 2026-09-15)
+
+Two faults, one section.
+
+**The poster box was rendered empty.** `<span class="po"></span>` with nothing
+inside it: nothing ever extracted an image for these rows. A rule meant to hide
+the box, `.imdbc-home .imdbc-result .po { display: none }`, never matched -
+the section is a sibling of `.imdbc-home`, not a descendant - so the reserved
+box stayed on screen, empty, on every visit.
+
+**And IMDb has stopped shipping the data.** Read live from a signed-out
+homepage, `pageProps.pageQueryData.data` now holds exactly one key: `news`.
+No `boxOfficeWeekendChart` at all. It was the only real content the homepage
+payload carried, which is why the section existed in that form.
+
+It is fetched now, alongside the other homepage rows:
+
+```
+boxOfficeWeekendChart(limit: 10) {
+  weekendStartDate weekendEndDate
+  entries { weekendGross { total { amount currency } }
+            title { … lifetimeGross(boxOfficeArea: DOMESTIC) { total { amount currency } } } } }
+```
+
+5 KB, and `boxOfficeArea` is required on `lifetimeGross` (the error names it).
+
+### "Total" was a US figure
+
+The `/chart/boxoffice/` page prints the payload's `lifetimeGross`, which it
+labelled "total". Measured against the API for Spider-Man: Brand New Day:
+
+| | |
+| --- | --- |
+| the payload's figure | $935,181,631 |
+| `lifetimeGross(boxOfficeArea: DOMESTIC)` | $935,181,631 |
+| `lifetimeGross(boxOfficeArea: WORLDWIDE)` | $2,451,432,584 |
+
+Identical to the dollar. So it is US-only, and "total" claimed a number two and
+a half times larger than the one shown. Both surfaces use the US figure now,
+read "$935M to date", and say "US" once in the heading.
+
+Also dropped: "24 cinemas", from the payload's `cinemas.total`, which said 24
+for a film taking $30M that weekend. Whatever that field counts, it is not what
+the label said.
