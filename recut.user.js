@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.12.1
+// @version      2.13.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -20,6 +20,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_listValues
 // @grant        GM_registerMenuCommand
+// @grant        GM_setClipboard
 // @connect      imdb.com
 // @connect      media-imdb.com
 // @connect      api.graphql.imdb.com
@@ -114,6 +115,7 @@
     watchOptions: { def: true, label: 'Show where to watch' },
     trailers: { def: true, label: 'Show trailers and videos' },
     photos: { def: true, label: 'Show photos' },
+    jellyfin: { def: false, label: 'Copy-for-Jellyfin button on titles' },
     reviewCount: { def: 10, label: 'User reviews per page' }
   };
 
@@ -306,6 +308,57 @@
     const w = node.width || node.maxWidth;
     const h = node.height || node.maxHeight;
     return w > 0 && h > 0 ? { width: w, height: h } : null;
+  }
+
+  /**
+   * Jellyfin reads a provider id straight out of a folder or file name, so a
+   * library entry can be pinned to the right title without a metadata search.
+   * Both of its docs pages give the same shape - square brackets, the key
+   * `imdbid`, a hyphen, the tconst:
+   *
+   *   Jellyfin Documentary (2030) [imdbid-tt00000000].mkv
+   *   https://jellyfin.org/docs/general/server/media/movies/
+   *   https://jellyfin.org/docs/general/server/media/shows/
+   *
+   * This is the bracketed token on its own, to append to a name you already
+   * have. Anything that is not a tconst is refused rather than wrapped.
+   */
+  function jellyfinTag(imdbId) {
+    return /^tt\d+$/.test(String(imdbId || '')) ? `[imdbid-${imdbId}]` : '';
+  }
+
+  /**
+   * GM_setClipboard first: it is the only one of the three that does not care
+   * about focus, secure contexts or the page's own permissions policy.
+   */
+  function copyText(text) {
+    if (!text) return Promise.resolve(false);
+    try {
+      if (typeof GM_setClipboard === 'function') { GM_setClipboard(text, 'text'); return Promise.resolve(true); }
+    } catch (_) { /* fall through */ }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
+      }
+    } catch (_) { /* fall through */ }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+      (document.getElementById('imdbc-root') || document.body).appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) {
+      warn('clipboard unavailable', e);
+      return false;
+    }
   }
 
   const imdbUrl = (path) => `https://www.imdb.com${pageLocale}${path}`;
@@ -1453,6 +1506,12 @@
         <a class="imdbc-btn imdbc-ext" data-imdbc-trakt href="${safeUrl(t.trakt)}" target="_blank" rel="noopener noreferrer">
           ${raw(MARKS.trakt)}<span>Trakt</span></a>`));
     }
+    if (settings.jellyfin && jellyfinTag(t.id)) {
+      parts.push(interpolate(html`
+        <button type="button" class="imdbc-btn imdbc-ext" data-imdbc-jellyfin="${jellyfinTag(t.id)}"
+                title="Copy ${jellyfinTag(t.id)} \u2014 paste onto the folder or file name">
+          ${raw(MARKS.copy)}<span>${jellyfinTag(t.id)}</span></button>`));
+    }
     return parts.join('');
   }
 
@@ -1939,6 +1998,15 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; align-items: center; }
 .imdbc-ext { display: inline-flex; align-items: center; gap: 9px; padding: 8px 14px; }
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
+/* The tag itself is the label, so it is set in the face a path belongs in. */
+:where(#imdbc-root) [data-imdbc-jellyfin] {
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-small);
+}
+:where(#imdbc-root) [data-imdbc-jellyfin].is-done {
+  border-color: var(--rb-top); color: var(--rb-top);
+}
 
 /* ── homepage ──────────────────────────────────────── */
 /* Search and links on the left, IMDb's hero trailer shrunk into the empty
@@ -3990,6 +4058,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   // Small brand marks, so a glance tells you whose score you are reading.
   const MARKS = {
+    copy: '<svg class="mk mk-svg" viewBox="0 0 16 16" aria-hidden="true">'
+      + '<rect x="5.2" y="2.2" width="8.3" height="10.4" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>'
+      + '<path d="M10.4 13.9v.4a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5V5.6A1.5 1.5 0 0 1 4 4.1h.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
     imdb: '<span class="mk mk-imdb">IMDb</span>',
     metacritic: '<span class="mk mk-mc" aria-hidden="true">m</span>',
     tomato: '<svg class="mk mk-svg" viewBox="0 0 16 16" aria-hidden="true">'
@@ -4827,6 +4898,24 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       // filmography all repaint their own lists, and none of them should have
       // to remember to rewire this.
       root.addEventListener('click', (e) => {
+        const copy = e.target.closest('[data-imdbc-jellyfin]');
+        if (copy) {
+          e.preventDefault();
+          const label = copy.querySelector('span');
+          const tag = copy.getAttribute('data-imdbc-jellyfin');
+          copyText(tag).then((ok) => {
+            if (!label || !label.isConnected) return;
+            const was = label.textContent;
+            label.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+            copy.classList.toggle('is-done', ok);
+            setTimeout(() => {
+              if (!label.isConnected) return;
+              label.textContent = was;
+              copy.classList.remove('is-done');
+            }, 1400);
+          });
+          return;
+        }
         const trigger = e.target.closest('[data-imdbc-roles]');
         if (!trigger) return;
         e.preventDefault();

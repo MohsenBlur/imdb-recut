@@ -68,12 +68,15 @@ const SHIM = `
   // every visitor. A synthetic one stands in here: the API answers it with
   // the unpersonalised list, which is what a signed-out visitor sees.
   try { document.cookie = 'session-id=133-4098123-7811234; path=/'; } catch (e) {}
-  var store = { 'setting:theme': 'dark' };
+  var store = { 'setting:theme': 'dark', 'setting:jellyfin': true };
   window.GM_getValue = function (k, d) { return k in store ? store[k] : d; };
   window.GM_setValue = function (k, v) { store[k] = v; };
   window.GM_deleteValue = function (k) { delete store[k]; };
   window.GM_listValues = function () { return Object.keys(store); };
   window.GM_registerMenuCommand = function () {};
+  // The manager's own clipboard call, which is the path the script prefers
+  // and the only one that does not need user activation.
+  window.GM_setClipboard = function (t) { window.__clip = t; };
   window.GM_xmlhttpRequest = function (o) {
     fetch('/x?u=' + encodeURIComponent(o.url),
       { method: o.method || 'GET', body: o.data || undefined, headers: o.headers || {} })

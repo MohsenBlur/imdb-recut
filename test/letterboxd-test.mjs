@@ -53,10 +53,14 @@ const PRE = `
   // This suite is about the Letterboxd button; the media chips that share the
   // same row have their own coverage.
   const mediaButtons = () => '';
+  // The row also holds the optional Jellyfin button, which reads a setting.
+  // Default it off, as the script does, and let the test turn it on.
+  const settings = { jellyfin: false };
 `;
 
-const NAMES = ['MARKS', 'LETTERBOXD_TYPES', 'letterboxdRedirect', 'actionsHtml'];
-const M = new Function(PRE + NAMES.map(sliceDecl).join('\n\n') + '\nreturn {LETTERBOXD_TYPES, letterboxdRedirect, letterboxdButton: (t) => actionsHtml(t)};')();
+const NAMES = ['MARKS', 'LETTERBOXD_TYPES', 'letterboxdRedirect', 'jellyfinTag', 'actionsHtml'];
+const M = new Function(PRE + NAMES.map(sliceDecl).join('\n\n')
+  + '\nreturn {LETTERBOXD_TYPES, letterboxdRedirect, settings, letterboxdButton: (t) => actionsHtml(t)};')();
 
 let fails = 0;
 const check = (label, ok, detail) => { if (!ok) fails++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? '  ' + detail : ''}`); };
@@ -71,6 +75,33 @@ for (const typeId of SHOULD) {
 for (const typeId of SHOULD_NOT) {
   const out = M.letterboxdButton({ id: 'tt2624370', typeId });
   check(`hidden for ${typeId || '(empty type)'}`, out === '', JSON.stringify(out).slice(0, 40));
+}
+
+console.log('\n[jellyfin] the optional button, and what it puts on the clipboard');
+{
+  // Off by default: the tag means nothing without a Jellyfin server.
+  M.settings.jellyfin = false;
+  check('absent until switched on',
+    !M.letterboxdButton({ id: 'tt0120737', typeId: 'movie' }).includes('data-imdbc-jellyfin'));
+
+  M.settings.jellyfin = true;
+  // Unlike Letterboxd, this one is not films-only: a series folder takes the
+  // same tag, which is the case the user asked for.
+  for (const typeId of ['movie', 'tvSeries', 'tvMiniSeries', 'tvMovie', 'short']) {
+    const out = M.letterboxdButton({ id: 'tt0096697', typeId });
+    check(`offered for ${typeId}`, out.includes('data-imdbc-jellyfin="[imdbid-tt0096697]"'),
+      (out.match(/data-imdbc-jellyfin="[^"]*"/) || ['(absent)'])[0]);
+  }
+
+  const out = M.letterboxdButton({ id: 'tt0120737', typeId: 'movie' });
+  check('the tag is the label, so what is copied is what is shown',
+    out.includes('>[imdbid-tt0120737]</span>'), out.slice(-60));
+  check('it is a button, not a link to nowhere', out.includes('<button type="button"'));
+  check('and it says what pressing it does', /title="Copy \[imdbid-tt0120737\]/.test(out));
+
+  check('nothing is offered for an id Jellyfin would not accept',
+    !M.letterboxdButton({ id: 'nm0000276', typeId: 'movie' }).includes('data-imdbc-jellyfin'));
+  M.settings.jellyfin = false;
 }
 
 console.log('\n[markup]');

@@ -216,6 +216,40 @@ console.log('\n[density] no single entry may set the height of its whole section
     (SRC.match(/.{0,40}characters\.join\(.{0,20}/) || ['(none)'])[0]);
 }
 
+console.log('\n[jellyfin] the tag has to match what Jellyfin actually parses');
+{
+  // Both docs pages give the same shape, and it is the whole point of the
+  // button - a tag Jellyfin does not recognise is worse than no button:
+  //   Jellyfin Documentary (2030) [imdbid-tt00000000].mkv
+  //   https://jellyfin.org/docs/general/server/media/movies/
+  //   https://jellyfin.org/docs/general/server/media/shows/
+  // Sliced by line, not by regex: the body contains a ${...} template
+  // placeholder, so a [^}]* match stops inside it and yields a broken slice.
+  const src = SRC.split(/\r?\n/);
+  const from = src.findIndex((l) => l.startsWith('  function jellyfinTag('));
+  const to = src.indexOf('  }', from);
+  const body = from < 0 || to < 0 ? '' : src.slice(from, to + 1).join('\n');
+  check('jellyfinTag is where the test thinks it is', !!body);
+  const jellyfinTag = new Function(body + '; return jellyfinTag;')();
+
+  check('a film id', jellyfinTag('tt0120737') === '[imdbid-tt0120737]', jellyfinTag('tt0120737'));
+  check('a series id', jellyfinTag('tt0096697') === '[imdbid-tt0096697]', jellyfinTag('tt0096697'));
+  check('the docs example round-trips',
+    jellyfinTag('tt00000000') === '[imdbid-tt00000000]', jellyfinTag('tt00000000'));
+  check('square brackets, not parentheses or braces',
+    /^\[imdbid-tt\d+\]$/.test(jellyfinTag('tt0096697')));
+  check('the key is imdbid, not imdb or imdbId',
+    jellyfinTag('tt1').startsWith('[imdbid-'), jellyfinTag('tt1'));
+  check('the tt prefix is kept - Jellyfin wants the whole tconst',
+    jellyfinTag('tt0096697').includes('tt0096697'));
+
+  // Anything that is not a tconst is refused rather than wrapped: a button
+  // offering [imdbid-nm0000276] would silently poison a library.
+  for (const bad of ['nm0000276', 'tt', '0096697', '', null, undefined, 'tt12 34', ' tt0096697']) {
+    check(`${JSON.stringify(bad) || String(bad)} is refused`, jellyfinTag(bad) === '', jellyfinTag(bad));
+  }
+}
+
 console.log('\n[overlays] the takeover must not hide its own overlays');
 {
   // The takeover hides every direct child of <body> that is not its root. The

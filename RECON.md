@@ -566,3 +566,32 @@ read "$935M to date", and say "US" once in the heading.
 Also dropped: "24 cinemas", from the payload's `cinemas.total`, which said 24
 for a film taking $30M that weekend. Whatever that field counts, it is not what
 the label said.
+
+## 13. Jellyfin's provider-id tag (checked against the docs 2026-09-15)
+
+Jellyfin will take a provider id straight out of a folder or file name instead
+of searching metadata for it. Both docs pages give the same shape:
+
+> Jellyfin Documentary (2030) [imdbid-tt00000000].mkv
+
+- <https://jellyfin.org/docs/general/server/media/movies/>
+- <https://jellyfin.org/docs/general/server/media/shows/>
+
+Square brackets, the key `imdbid`, a hyphen, the whole tconst including `tt`.
+The year and the tag are both optional parts of the name, and the shows page
+shows the tag used without a year (`Jellyfin Documentary [imdbid-tt00000000]`),
+so the tag on its own is a valid thing to paste onto a name you already have -
+which is what the button copies.
+
+`imdbid` is the only provider key either page demonstrates.
+
+Anything that is not a tconst is refused rather than wrapped: a button offering
+`[imdbid-nm0000276]` would quietly mis-file a library, and there is no error to
+notice because Jellyfin simply would not match it.
+
+**Clipboard, in order:** `GM_setClipboard` (the manager's own, and the only one
+that does not care about focus, secure contexts or the page's permissions
+policy), then `navigator.clipboard.writeText`, then a `execCommand('copy')`
+textarea. Both of the first two were verified with a real click in the browser;
+a *synthetic* click reaches neither, because they need user activation - which
+is why the first test of this showed the last-resort branch and not a bug.
