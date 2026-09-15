@@ -26,8 +26,8 @@ the page still works, with less on it.
 
 Everything that puts something on screen has a toggle in **Settings** (top bar),
 including the homepage takeover, so it can be cut back further than the defaults.
-One is off until you want it: **Copy-for-Jellyfin** puts a button on every title
-that copies `[imdbid-tt0120737]`, the tag [Jellyfin reads out of a folder or file
+One is off until you want it: **Jellyfin** puts a button on every title that
+copies `[imdbid-tt0120737]`, the tag [Jellyfin reads out of a folder or file
 name](https://jellyfin.org/docs/general/server/media/movies/).
 **Original page** in the top bar shows you IMDb's real page instantly.
 
@@ -127,5 +127,8 @@ these sites' data shapes, including what turned out to be wrong the first time.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). Not affiliated with IMDb. Uses IMDb's public
+MIT — see [LICENSE](LICENSE). Not affiliated with IMDb or Jellyfin. The
+Jellyfin icon is the project's own, from
+[jellyfin/jellyfin-ux](https://github.com/jellyfin/jellyfin-ux), CC BY-SA 4.0
+© the Jellyfin contributors. Uses IMDb's public
 endpoints for personal, non-commercial use.

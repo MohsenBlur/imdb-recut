@@ -595,3 +595,47 @@ policy), then `navigator.clipboard.writeText`, then a `execCommand('copy')`
 textarea. Both of the first two were verified with a real click in the browser;
 a *synthetic* click reaches neither, because they need user activation - which
 is why the first test of this showed the last-resort branch and not a bug.
+
+## 14. The title hero was two thirds empty (measured 2026-09-15)
+
+Where-to-watch, the action buttons and the media panel are all naturally wide,
+and all three were stacked inside the hero's narrow right-hand column. That made
+the column far taller than the poster beside it, so the bottom two thirds of the
+left column was blank while the right was crowded and wrapping.
+
+They are one band across both columns now (`grid-column: 1 / -1`), starting
+under the poster rather than beside it. On the same film page:
+
+| | before | after |
+| --- | --- | --- |
+| hero height | ~1,180px | ~560px |
+| score tiles | 3 + 2, wrapped | 5 across, one row |
+| where-to-watch | two lines | one |
+| action buttons | two rows | one |
+
+The column is `minmax(0, 1fr)` rather than `1fr`, so it takes its share of the
+row instead of being sized by its widest child.
+
+## 15. Two settings where there was one
+
+`watchOptions` covered both halves of the row. It is now `watchStream` and
+`watchRentBuy`, mapped per category:
+
+| IMDb category | switch |
+| --- | --- |
+| `STREAMING`, `FREE` | `watchStream` |
+| `RENT/BUY`, `THEATER` | `watchRentBuy` |
+
+A cinema ticket is paid per viewing, which puts it with rent-or-buy rather than
+with the subscriptions. A category neither table knows is shown while *either*
+half is on, so IMDb adding a name cannot make a row vanish unexplained.
+
+Anyone who had switched the old setting off meant it, so `loadSettings` reads
+the legacy value once and carries the `false` across to both halves - but only
+where the new key has no value of its own, or turning one back on would be
+undone on the next load.
+
+**And the Jellyfin button was gated on a setting the panel never listed**, so
+the only way to reach it was the storage layer. `load-test.mjs` now walks
+`SETTING_DEFS` and asserts every on/off key appears in the panel: a switch
+nobody can reach is not optional, it is off.

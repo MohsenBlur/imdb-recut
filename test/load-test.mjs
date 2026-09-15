@@ -216,6 +216,59 @@ console.log('\n[density] no single entry may set the height of its whole section
     (SRC.match(/.{0,40}characters\.join\(.{0,20}/) || ['(none)'])[0]);
 }
 
+console.log('\n[where to watch] one switch became two, without losing a preference');
+{
+  const src = SRC.split(/\r?\n/);
+  const slice = (head) => {
+    const i = src.findIndex((l) => l.startsWith(head));
+    const j = src.indexOf('  }', i);
+    return i < 0 || j < 0 ? '' : src.slice(i, j + 1).join('\n');
+  };
+  const settings = {};
+  const M = new Function('settings',
+    slice('  const WATCH_CATEGORY_SETTING') + '\n' + slice('  function watchCategoryOn')
+    + '\nreturn { watchCategoryOn, WATCH_CATEGORY_SETTING };')(settings);
+
+  settings.watchStream = true; settings.watchRentBuy = false;
+  check('streaming follows the streaming switch', M.watchCategoryOn('STREAMING'));
+  check('free streaming counts as streaming', M.watchCategoryOn('FREE'));
+  check('rent/buy is off with its own switch', !M.watchCategoryOn('RENT/BUY'));
+  check('a cinema ticket is paid per viewing, so it follows rent/buy',
+    !M.watchCategoryOn('THEATER'));
+
+  settings.watchStream = false; settings.watchRentBuy = true;
+  check('and the other way round',
+    !M.watchCategoryOn('STREAMING') && !M.watchCategoryOn('FREE')
+    && M.watchCategoryOn('RENT/BUY') && M.watchCategoryOn('THEATER'));
+
+  // A category nobody has seen must not disappear silently just because
+  // IMDb added a name after this was written.
+  settings.watchStream = false; settings.watchRentBuy = true;
+  check('an unknown category shows while either half is on', M.watchCategoryOn('SOMETHING_NEW'));
+  settings.watchStream = false; settings.watchRentBuy = false;
+  check('and hides only when both are off', !M.watchCategoryOn('SOMETHING_NEW'));
+  check('with both off, nothing at all is shown',
+    !M.watchCategoryOn('STREAMING') && !M.watchCategoryOn('RENT/BUY'));
+
+  check('every category the labels know has a switch',
+    Object.keys(new Function('return ' + slice('  const WATCH_CATEGORY_LABEL').replace(/^\s*const [^=]+=\s*/, '').replace(/;\s*$/, ''))())
+      .every((k) => k in M.WATCH_CATEGORY_SETTING),
+    Object.keys(M.WATCH_CATEGORY_SETTING).join(', '));
+}
+
+console.log('\n[settings] a switch nobody can reach is not optional, it is off');
+{
+  // The Jellyfin button shipped gated on a setting that the panel never
+  // listed, so the only way to turn it on was the storage layer.
+  const defs = (SRC.match(/const SETTING_DEFS = \{[\s\S]*?\n  \};/) || [''])[0];
+  const panel = (SRC.match(/\$\{\['cleanHomepage'[\s\S]*?\]\.map/) || [''])[0];
+  const keys = [...defs.matchAll(/^    (\w+):/gm)].map((m) => m[1])
+    .filter((k) => !/^(theme|reviewCount)$/.test(k));
+  check('every on/off setting appears in the panel',
+    keys.every((k) => panel.includes(`'${k}'`)),
+    keys.filter((k) => !panel.includes(`'${k}'`)).join(', ') || 'all present');
+}
+
 console.log('\n[jellyfin] the tag has to match what Jellyfin actually parses');
 {
   // Both docs pages give the same shape, and it is the whole point of the

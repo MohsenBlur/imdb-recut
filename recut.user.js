@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recut for IMDb
 // @namespace    https://github.com/MohsenBlur/imdb-recut
-// @version      2.13.0
+// @version      2.14.0
 // @description  Replaces IMDb pages with a dense, quiet layout: cast, user reviews (with Rotten Tomatoes critic + audience scores), season/episode counts and recommendations for titles; known-for and a full filmography with the characters played for people. Everything else is gone.
 // @author       MohsenBlur
 // @license      MIT
@@ -112,7 +112,8 @@
     hideSelfCredits: { def: true, label: 'Hide "Self" and archive-footage credits by default' },
     declineCookies: { def: true, label: 'Hide and decline the cookie banner' },
     cleanHomepage: { def: true, label: 'Replace the IMDb homepage' },
-    watchOptions: { def: true, label: 'Show where to watch' },
+    watchStream: { def: true, label: 'Show where to stream' },
+    watchRentBuy: { def: true, label: 'Show where to rent or buy' },
     trailers: { def: true, label: 'Show trailers and videos' },
     photos: { def: true, label: 'Show photos' },
     jellyfin: { def: false, label: 'Copy-for-Jellyfin button on titles' },
@@ -121,10 +122,22 @@
 
   const settings = {};
   function loadSettings() {
+    // `watchOptions` used to be one switch over both halves. Anyone who had
+    // turned it off meant it, so carry that across rather than handing them
+    // back a row they had already dismissed.
+    let legacyWatch;
+    try { legacyWatch = GM_getValue('setting:watchOptions', undefined); } catch (_) { legacyWatch = undefined; }
+
     for (const [key, def] of Object.entries(SETTING_DEFS)) {
       let v;
       try { v = GM_getValue('setting:' + key, def.def); } catch (_) { v = def.def; }
-      settings[key] = v === undefined || v === null ? def.def : v;
+      if (v === undefined || v === null) v = def.def;
+      if (legacyWatch === false && (key === 'watchStream' || key === 'watchRentBuy')) {
+        let own;
+        try { own = GM_getValue('setting:' + key, undefined); } catch (_) { own = undefined; }
+        if (own === undefined || own === null) v = false;
+      }
+      settings[key] = v;
     }
   }
   function saveSetting(key, value) {
@@ -1509,8 +1522,8 @@
     if (settings.jellyfin && jellyfinTag(t.id)) {
       parts.push(interpolate(html`
         <button type="button" class="imdbc-btn imdbc-ext" data-imdbc-jellyfin="${jellyfinTag(t.id)}"
-                title="Copy ${jellyfinTag(t.id)} \u2014 paste onto the folder or file name">
-          ${raw(MARKS.copy)}<span>${jellyfinTag(t.id)}</span></button>`));
+                title="Copy ${jellyfinTag(t.id)} — paste onto the folder or file name">
+          ${raw(MARKS.jellyfin)}<span>Jellyfin</span></button>`));
     }
     return parts.join('');
   }
@@ -1678,7 +1691,17 @@ html.imdbc-off #imdbc-root { display: none !important; }
 .imdbc-btn-ghost:hover { background: var(--imdbc-panel-2); color: var(--imdbc-text); }
 
 /* ── hero ──────────────────────────────────────────────────────────────── */
-.imdbc-hero { display: grid; grid-template-columns: 200px 1fr; gap: 26px; padding: 26px 0 8px; }
+/* Where to watch, the buttons and the media panel are naturally wide and were
+   stacked in the narrow right-hand column, which made that column tall enough
+   to leave a screenful of nothing under the poster. They run across both
+   columns now, so they start under the poster instead of beside it. */
+.imdbc-hero {
+  display: grid; grid-template-columns: 200px minmax(0, 1fr);
+  gap: 26px; padding: 26px 0 8px; align-items: start;
+}
+.imdbc-hero > .band { grid-column: 1 / -1; display: grid; gap: 14px; }
+.imdbc-hero > .band > :empty { display: none; }
+.imdbc-hero > .band > * { margin: 0; }
 .imdbc-hero-poster {
   width: 200px; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden;
   background: var(--imdbc-panel-2); border: 1px solid var(--imdbc-border);
@@ -1998,12 +2021,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 .imdbc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; align-items: center; }
 .imdbc-ext { display: inline-flex; align-items: center; gap: 9px; padding: 8px 14px; }
 .imdbc-ext .mk-lbx { width: 26px; height: 10.4px; }
-/* The tag itself is the label, so it is set in the face a path belongs in. */
-:where(#imdbc-root) [data-imdbc-jellyfin] {
-  cursor: pointer;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--fs-small);
-}
+:where(#imdbc-root) [data-imdbc-jellyfin] { cursor: pointer; }
+:where(#imdbc-root) [data-imdbc-jellyfin] .mk-svg { width: 16px; height: 16px; }
 :where(#imdbc-root) [data-imdbc-jellyfin].is-done {
   border-color: var(--rb-top); color: var(--rb-top);
 }
@@ -3293,6 +3312,19 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   // must never be written to the disk cache: it would be wrong the moment the
   // user travelled or switched a VPN on.
   const WATCH_CATEGORY_LABEL = { STREAMING: 'Stream', 'RENT/BUY': 'Rent or buy', FREE: 'Free', THEATER: 'In cinemas' };
+  // Which half of the setting each category belongs to. A cinema ticket is
+  // paid per viewing, so it sits with rent-or-buy rather than with streaming.
+  const WATCH_CATEGORY_SETTING = {
+    STREAMING: 'watchStream', FREE: 'watchStream',
+    'RENT/BUY': 'watchRentBuy', THEATER: 'watchRentBuy'
+  };
+
+  function watchCategoryOn(category) {
+    const key = WATCH_CATEGORY_SETTING[category];
+    // A category we have not seen is shown while either half is on: IMDb
+    // adding a name should not make a row disappear without explanation.
+    return key ? !!settings[key] : !!(settings.watchStream || settings.watchRentBuy);
+  }
 
   function fetchWatchOptions(titleId) {
     return memoize('watch:' + titleId, 30 * 60 * 1000, async () => {
@@ -3318,8 +3350,9 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   }
 
   function watchHtml(groups) {
-    if (!groups || !groups.length) return '';
-    return groups.map((g) => interpolate(html`
+    const shown = (groups || []).filter((g) => watchCategoryOn(g.category));
+    if (!shown.length) return '';
+    return shown.map((g) => interpolate(html`
       <span class="imdbc-watch-group">
         <span class="k">${WATCH_CATEGORY_LABEL[g.category] || g.category}</span>
         ${g.options.map((o) => html`
@@ -3331,7 +3364,7 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
   }
 
   async function wireWatchOptions(root, t) {
-    if (!settings.watchOptions) return;
+    if (!settings.watchStream && !settings.watchRentBuy) return;
     const host = root.querySelector('[data-imdbc-watch]');
     if (!host || WATCH_UNSUPPORTED.test(t.typeId || '')) return;
     const token = renderSeq;
@@ -3982,13 +4015,13 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
       ${topBar(titleUrl(t.id))}
       <div class="imdbc-wrap">
         <div class="imdbc-hero">
-          <div>
+          <div class="art">
             <div class="imdbc-hero-poster">
               ${heroPoster ? html`<img src="${heroPoster}" alt="Poster for ${t.title}" decoding="async">` : ''}
             </div>
             ${raw(trailerPreview(t))}
           </div>
-          <div>
+          <div class="head">
             <h1 class="imdbc-h1">${t.title}</h1>
             <div class="imdbc-sub">${raw(metaBits.join('<span class="dot">·</span>'))}</div>
             ${t.originalTitle && t.originalTitle !== t.title
@@ -3997,10 +4030,12 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
             ${t.genres.length ? html`<div class="imdbc-chips">${t.genres.map((g) => html`<span class="imdbc-chip">${g}</span>`)}</div>` : ''}
             ${t.plot ? html`<p class="imdbc-plot">${t.plot}</p>` : ''}
             <div class="imdbc-scores" data-imdbc-scores>${raw(scoreStrip(t))}</div>
+            ${crewLines.length ? html`<div class="imdbc-crew">${crewLines}</div>` : ''}
+          </div>
+          <div class="band">
             <div class="imdbc-watchrow" data-imdbc-watch></div>
             <div class="imdbc-actions" data-imdbc-actions>${raw(actionsHtml(t))}</div>
             <div class="imdbc-mediapanel" data-imdbc-mediapanel></div>
-            ${crewLines.length ? html`<div class="imdbc-crew">${crewLines}</div>` : ''}
           </div>
         </div>
 
@@ -4058,9 +4093,15 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
 
   // Small brand marks, so a glance tells you whose score you are reading.
   const MARKS = {
-    copy: '<svg class="mk mk-svg" viewBox="0 0 16 16" aria-hidden="true">'
-      + '<rect x="5.2" y="2.2" width="8.3" height="10.4" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>'
-      + '<path d="M10.4 13.9v.4a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5V5.6A1.5 1.5 0 0 1 4 4.1h.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+    // Jellyfin's own icon, verbatim from jellyfin/jellyfin-ux (branding/SVG/
+    // icon-transparent.svg), CC BY-SA 4.0 - the Jellyfin contributors. The
+    // gradient id is namespaced because several of these can share a page.
+    jellyfin: '<svg class="mk mk-svg" viewBox="0 0 512 512" aria-hidden="true">'
+      + '<defs><linearGradient id="imdbc-jf" gradientUnits="userSpaceOnUse" x1="110.25" y1="213.3" x2="496.14" y2="436.09">'
+      + '<stop offset="0" stop-color="#AA5CC3"/><stop offset="1" stop-color="#00A4DC"/></linearGradient></defs>'
+      + '<path d="M256,201.6c-20.4,0-86.2,119.3-76.2,139.4s142.5,19.9,152.4,0S276.5,201.6,256,201.6z" fill="url(#imdbc-jf)"/>'
+      + '<path d="M256,23.3c-61.6,0-259.8,359.4-229.6,420.1s429.3,60,459.2,0S317.6,23.3,256,23.3z'
+      + 'M406.5,390.8c-19.6,39.3-281.1,39.8-300.9,0s110.1-275.3,150.4-275.3S426.1,351.4,406.5,390.8z" fill="url(#imdbc-jf)"/></svg>',
     imdb: '<span class="mk mk-imdb">IMDb</span>',
     metacritic: '<span class="mk mk-mc" aria-hidden="true">m</span>',
     tomato: '<svg class="mk mk-svg" viewBox="0 0 16 16" aria-hidden="true">'
@@ -4813,7 +4854,8 @@ a.imdbc-score:hover { border-color: var(--brand, var(--imdbc-border)); text-deco
           ${SETTING_DEFS.theme.options.map((o) => html`<option value="${o}"${settings.theme === o ? raw(' selected') : ''}>${o}</option>`)}
         </select>
       </div>
-      ${['cleanHomepage', 'rottenTomatoes', 'watchOptions', 'trailers', 'photos', 'fullCast', 'fullCredits', 'hideSelfCredits', 'declineCookies'].map((k) => html`
+      ${['cleanHomepage', 'rottenTomatoes', 'watchStream', 'watchRentBuy', 'trailers', 'photos',
+        'fullCast', 'fullCredits', 'hideSelfCredits', 'jellyfin', 'declineCookies'].map((k) => html`
         <div class="imdbc-set-row">
           <label for="imdbc-set-${k}">${SETTING_DEFS[k].label}</label>
           <input id="imdbc-set-${k}" type="checkbox" data-set="${k}"${settings[k] ? raw(' checked') : ''}>

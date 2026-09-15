@@ -94,8 +94,12 @@ console.log('\n[jellyfin] the optional button, and what it puts on the clipboard
   }
 
   const out = M.letterboxdButton({ id: 'tt0120737', typeId: 'movie' });
-  check('the tag is the label, so what is copied is what is shown',
-    out.includes('>[imdbid-tt0120737]</span>'), out.slice(-60));
+  check('it reads as a Jellyfin button, not as a string of id',
+    out.includes('<span>Jellyfin</span>'), out.slice(-60));
+  check('it carries Jellyfin’s own icon, not an approximation',
+    out.includes('#AA5CC3') && out.includes('#00A4DC'));
+  check('what gets copied is still on the element and in the tooltip',
+    out.includes('data-imdbc-jellyfin="[imdbid-tt0120737]"'));
   check('it is a button, not a link to nowhere', out.includes('<button type="button"'));
   check('and it says what pressing it does', /title="Copy \[imdbid-tt0120737\]/.test(out));
 
